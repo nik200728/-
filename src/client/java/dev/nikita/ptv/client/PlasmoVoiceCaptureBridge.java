@@ -11,6 +11,8 @@ import su.plo.voice.proto.data.audio.capture.VoiceActivation;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** Hooks into Plasmo Voice's existing microphone capture pipeline without activating proximity voice. */
@@ -63,12 +65,47 @@ public final class PlasmoVoiceCaptureBridge implements AutoCloseable {
                 .orElse(48_000);
     }
 
-    /** Raw microphone PCM captured from Plasmo Voice's capture thread. */
+    /** Encode captured PCM using the same Opus implementation exposed by Plasmo Voice. */
+    public CompletableFuture<EncodedVoiceMessage> encodeAsync(CapturedAudio captured, Executor executor) {
+        return CompletableFuture.supplyAsync(() -> {
+            if (captured.frames().isEmpty()) {
+                return new EncodedVoiceMessage(List.of(), captured.durationMs(), getSampleRate());
+            }
+
+            var serverInfo = voiceClient.getServerInfo()
+                    .orElseThrow(() -> new IllegalStateException("Plasmo Voice server connection is not ready"));
+            AudioEncoder encoder = serverInfo.createOpusEncoder(false);
+            List<byte[]> opusFrames = new ArrayList<>(captured.frames().size());
+            try {
+                encoder.open();
+                for (short[] pcm : captured.frames()) {
+                    byte[] encoded = encoder.encode(pcm);
+                    if (encoded != null && encoded.length > 0) {
+                        opusFrames.add(encoded);
+                    }
+                }
+            } finally {
+                encoder.close();
+            }
+            return new EncodedVoiceMessage(opusFrames, captured.durationMs(),
+                    serverInfo.getVoiceInfo().getCaptureInfo().getSampleRate());
+        }, executor);
+    }
+
     public record CapturedAudio(List<short[]> frames, long durationMs) {
         public int sampleCount() {
             int count = 0;
             for (short[] frame : frames) count += frame.length;
             return count;
+        }
+    }
+
+    /** Opus packets ready for the message/storage layer. OGG muxing is deliberately separate. */
+    public record EncodedVoiceMessage(List<byte[]> opusFrames, long durationMs, int sampleRate) {
+        public int encodedBytes() {
+            int total = 0;
+            for (byte[] frame : opusFrames) total += frame.length;
+            return total;
         }
     }
 
@@ -107,7 +144,6 @@ public final class PlasmoVoiceCaptureBridge implements AutoCloseable {
                     frames.add(samples.clone());
                 }
             }
-            // Never activate: these samples must not enter Plasmo Voice proximity packets.
             return Result.NOT_ACTIVATED;
         }
 
