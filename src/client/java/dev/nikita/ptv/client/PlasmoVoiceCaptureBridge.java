@@ -59,8 +59,12 @@ public final class PlasmoVoiceCaptureBridge implements AutoCloseable {
                 .orElse(48_000);
     }
 
-    /** Uses Plasmo Voice's own Opus encoder; this method must run off the Minecraft render thread. */
-    public CompletableFuture<EncodedVoiceMessage> encodeAsync(CapturedAudio captured, Executor executor) {
+    public Executor getBackgroundExecutor() {
+        return voiceClient.getBackgroundExecutor();
+    }
+
+    /** Uses Plasmo Voice's own Opus encoder; this method runs on PV's background executor. */
+    public CompletableFuture<EncodedVoiceMessage> encodeAsync(CapturedAudio captured) {
         return CompletableFuture.supplyAsync(() -> {
             if (captured.frames().isEmpty()) {
                 return new EncodedVoiceMessage(List.of(), captured.durationMs(), getSampleRate());
@@ -83,7 +87,7 @@ public final class PlasmoVoiceCaptureBridge implements AutoCloseable {
                     captured.durationMs(),
                     serverInfo.getVoiceInfo().getCaptureInfo().getSampleRate()
             );
-        }, executor);
+        }, getBackgroundExecutor());
     }
 
     public record CapturedAudio(List<short[]> frames, long durationMs) {
@@ -131,7 +135,6 @@ public final class PlasmoVoiceCaptureBridge implements AutoCloseable {
             if (recording.get() && samples != null && samples.length > 0) {
                 synchronized (frames) { frames.add(samples.clone()); }
             }
-            // Never activate: our samples never enter Plasmo Voice proximity packets.
             return Result.NOT_ACTIVATED;
         }
 
