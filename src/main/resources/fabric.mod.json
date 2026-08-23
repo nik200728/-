@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "tgvoice",
+  "version": "${version}",
+  "name": "Telegram Voice Messages",
+  "description": "Telegram-style voice messages for Plasmo Voice with an external Telegram Bridge.",
+  "authors": ["nik200728"],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["nik200728.tgvoice.TelegramVoiceMod"]
+  },
+  "depends": {
+    "fabricloader": ">=0.18.0",
+    "minecraft": "26.1.x",
+    "java": ">=25",
+    "plasmovoice": ">=2.1.13"
+  }
+}
