@@ -39,7 +39,7 @@ public final class RecordingController {
                 return;
             }
 
-            captureBridge.encodeAsync(captured, Runnable::run)
+            captureBridge.encodeAsync(captured)
                     .whenComplete((message, error) -> {
                         if (error != null) {
                             PlasmoTelegramVoice.LOGGER.error("Voice message Opus encoding failed", error);
@@ -64,8 +64,9 @@ public final class RecordingController {
 
     public void tick() {
         if (!recording) return;
-        if (Minecraft.getInstance().getWindow().getWindow() != 0
-                && GLFW.glfwGetMouseButton(Minecraft.getInstance().getWindow().getWindow(), GLFW.GLFW_MOUSE_BUTTON_RIGHT) == GLFW.GLFW_PRESS) {
+        Minecraft client = Minecraft.getInstance();
+        long window = client.getWindow().getWindow();
+        if (window != 0 && GLFW.glfwGetMouseButton(window, GLFW.GLFW_MOUSE_BUTTON_RIGHT) == GLFW.GLFW_PRESS) {
             cancel();
             return;
         }
