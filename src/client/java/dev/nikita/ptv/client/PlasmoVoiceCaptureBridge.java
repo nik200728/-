@@ -30,9 +30,7 @@ public final class PlasmoVoiceCaptureBridge implements AutoCloseable {
     }
 
     public void start() {
-        synchronized (frames) {
-            frames.clear();
-        }
+        synchronized (frames) { frames.clear(); }
         startedAt = System.currentTimeMillis();
         recording.set(true);
     }
@@ -50,14 +48,10 @@ public final class PlasmoVoiceCaptureBridge implements AutoCloseable {
 
     public void cancel() {
         recording.set(false);
-        synchronized (frames) {
-            frames.clear();
-        }
+        synchronized (frames) { frames.clear(); }
     }
 
-    public boolean isRecording() {
-        return recording.get();
-    }
+    public boolean isRecording() { return recording.get(); }
 
     public int getSampleRate() {
         return voiceClient.getServerInfo()
@@ -65,13 +59,12 @@ public final class PlasmoVoiceCaptureBridge implements AutoCloseable {
                 .orElse(48_000);
     }
 
-    /** Encode captured PCM using the same Opus implementation exposed by Plasmo Voice. */
+    /** Uses Plasmo Voice's own Opus encoder; this method must run off the Minecraft render thread. */
     public CompletableFuture<EncodedVoiceMessage> encodeAsync(CapturedAudio captured, Executor executor) {
         return CompletableFuture.supplyAsync(() -> {
             if (captured.frames().isEmpty()) {
                 return new EncodedVoiceMessage(List.of(), captured.durationMs(), getSampleRate());
             }
-
             var serverInfo = voiceClient.getServerInfo()
                     .orElseThrow(() -> new IllegalStateException("Plasmo Voice server connection is not ready"));
             AudioEncoder encoder = serverInfo.createOpusEncoder(false);
@@ -80,15 +73,16 @@ public final class PlasmoVoiceCaptureBridge implements AutoCloseable {
                 encoder.open();
                 for (short[] pcm : captured.frames()) {
                     byte[] encoded = encoder.encode(pcm);
-                    if (encoded != null && encoded.length > 0) {
-                        opusFrames.add(encoded);
-                    }
+                    if (encoded != null && encoded.length > 0) opusFrames.add(encoded);
                 }
             } finally {
                 encoder.close();
             }
-            return new EncodedVoiceMessage(opusFrames, captured.durationMs(),
-                    serverInfo.getVoiceInfo().getCaptureInfo().getSampleRate());
+            return new EncodedVoiceMessage(
+                    opusFrames,
+                    captured.durationMs(),
+                    serverInfo.getVoiceInfo().getCaptureInfo().getSampleRate()
+            );
         }, executor);
     }
 
@@ -100,7 +94,6 @@ public final class PlasmoVoiceCaptureBridge implements AutoCloseable {
         }
     }
 
-    /** Opus packets ready for the message/storage layer. OGG muxing is deliberately separate. */
     public record EncodedVoiceMessage(List<byte[]> opusFrames, long durationMs, int sampleRate) {
         public int encodedBytes() {
             int total = 0;
@@ -113,15 +106,11 @@ public final class PlasmoVoiceCaptureBridge implements AutoCloseable {
         private final Hotkey internalHotkey;
 
         private CaptureActivation() {
-            super(
-                    "plasmo-telegram-voice-capture",
-                    "key.plasmo-telegram-voice.record",
-                    "plasmovoice:textures/icons/microphone.png",
-                    List.of(), 0, false, false, false, null, Integer.MAX_VALUE
-            );
+            super("plasmo-telegram-voice-capture", "key.plasmo-telegram-voice.record",
+                    "plasmovoice:textures/icons/microphone.png", List.of(), 0,
+                    false, false, false, null, Integer.MAX_VALUE);
             internalHotkey = voiceClient.getHotkeys().register(
-                    "key.plasmo-telegram-voice.internal", List.of(), "hidden", true
-            );
+                    "key.plasmo-telegram-voice.internal", List.of(), "hidden", true);
         }
 
         @Override public @NotNull Type getType() { return Type.PUSH_TO_TALK; }
@@ -140,10 +129,9 @@ public final class PlasmoVoiceCaptureBridge implements AutoCloseable {
         @Override
         public @NotNull Result process(short[] samples, @Nullable Result result) {
             if (recording.get() && samples != null && samples.length > 0) {
-                synchronized (frames) {
-                    frames.add(samples.clone());
-                }
+                synchronized (frames) { frames.add(samples.clone()); }
             }
+            // Never activate: our samples never enter Plasmo Voice proximity packets.
             return Result.NOT_ACTIVATED;
         }
 
