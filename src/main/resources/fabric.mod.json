@@ -13,7 +13,7 @@
   },
   "depends": {
     "fabricloader": ">=0.18.4",
-    "minecraft": "26.1.x",
+    "minecraft": "26.1.2",
     "java": ">=25",
     "plasmovoice": ">=2.1.13"
   }
