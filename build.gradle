@@ -10,6 +10,10 @@ base {
     archivesName = project.archives_base_name
 }
 
+repositories {
+    maven { url = 'https://api.modrinth.com/maven' }
+}
+
 loom {
     splitEnvironmentSourceSets()
     mods {
@@ -24,6 +28,10 @@ dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
     implementation "net.fabricmc:fabric-loader:${project.loader_version}"
     implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+
+    // Plasmo Voice is a runtime dependency. We compile against its public API,
+    // but never replace or embed its voice protocol.
+    modCompileOnly "maven.modrinth:plasmovoice:${project.plasmo_voice_version}"
 }
 
 processResources {
