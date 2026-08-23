@@ -13,7 +13,7 @@ base {
 repositories {
     mavenCentral()
     maven { url = 'https://maven.fabricmc.net/' }
-    maven { url = 'https://repo.plasmovoice.com/releases' }
+    maven { url = 'https://repo.plasmoverse.com/releases' }
 }
 
 dependencies {
@@ -21,7 +21,10 @@ dependencies {
     mappings loom.officialMojangMappings()
     modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
-    modCompileOnly "su.plo.voice:plasmovoice-api:${project.plasmo_voice_api_version}"
+
+    // Public Plasmo Voice addon APIs. The actual Plasmo Voice mod is a runtime dependency.
+    modCompileOnly "su.plo.voice.api:client:${project.plasmo_voice_api_version}"
+    modCompileOnly "su.plo.voice.api:server:${project.plasmo_voice_api_version}"
 }
 
 processResources {
