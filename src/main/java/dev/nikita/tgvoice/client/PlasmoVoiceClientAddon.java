@@ -10,11 +10,9 @@ import su.plo.voice.api.client.event.audio.capture.AudioCaptureProcessedEvent;
 import su.plo.voice.api.event.EventSubscribe;
 
 /**
- * Plasmo Voice client addon integration.
- *
- * This listens to PV's already-open microphone pipeline. It does not create a
- * second input device and it never sends these samples through PV's proximity
- * voice activation/protocol.
+ * Real Plasmo Voice client integration.
+ * It consumes PCM from PV's existing capture pipeline and never creates a
+ * second microphone stream or sends Voice Message audio through proximity voice.
  */
 @Addon(
         id = "pv-addon-tgvoice",
@@ -24,27 +22,40 @@ import su.plo.voice.api.event.EventSubscribe;
 )
 public final class PlasmoVoiceClientAddon implements AddonInitializer {
     private static final Logger LOGGER = LoggerFactory.getLogger("tgvoice/plasmovoice");
+    private static volatile PlasmoVoiceClientAddon instance;
 
     @InjectPlasmoVoice
     private PlasmoVoiceClient voiceClient;
 
     private volatile RecordingSession recordingSession;
 
+    public PlasmoVoiceClientAddon() {
+        instance = this;
+    }
+
+    public static PlasmoVoiceClientAddon getInstance() {
+        return instance;
+    }
+
     @Override
     public void onAddonInitialize() {
-        LOGGER.info("Plasmo Voice client API connected");
+        LOGGER.info("Plasmo Voice client API connected; using existing capture pipeline");
     }
 
     @Override
     public void onAddonShutdown() {
         recordingSession = null;
+        voiceClient = null;
+        instance = null;
         LOGGER.info("Plasmo Voice client addon stopped");
     }
 
-    /** Starts collecting processed mono PCM from PV's existing capture pipeline. */
     public void startRecording(RecordingSession session) {
         if (session == null || !session.isActive()) {
             throw new IllegalArgumentException("Recording session must be active");
+        }
+        if (voiceClient == null) {
+            throw new IllegalStateException("Plasmo Voice client API is not initialized");
         }
         recordingSession = session;
     }
@@ -64,8 +75,6 @@ public final class PlasmoVoiceClientAddon implements AddonInitializer {
             return;
         }
 
-        // Use PV's processed mono samples. This keeps the selected PV input
-        // device and its processing chain while avoiding a second microphone.
         short[] samples = event.getProcessed().getMono();
         if (samples != null && samples.length > 0) {
             session.appendPcm(samples, 0, samples.length);
