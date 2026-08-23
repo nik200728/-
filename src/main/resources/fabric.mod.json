@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "plasmo-telegram-voice",
+  "version": "${version}",
+  "name": "Plasmo Telegram Voice Messages",
+  "description": "Telegram-style voice messages for Plasmo Voice with a future Telegram Bridge integration.",
+  "authors": ["Nikita"],
+  "license": "MIT",
+  "environment": "*",
+  "entrypoints": {
+    "main": ["dev.nikita.ptv.PlasmoTelegramVoice"],
+    "client": ["dev.nikita.ptv.client.PlasmoTelegramVoiceClient"]
+  },
+  "depends": {
+    "fabricloader": ">=0.19.3",
+    "minecraft": "26.1.2",
+    "fabric-api": ">=0.155.2+26.1.2"
+  },
+  "suggests": {
+    "plasmovoice": "2.1.x"
+  }
+}
