@@ -1,6 +1,6 @@
 package dev.nikita.tgvoice.client;
 
-/** Client-side state machine. It never intercepts normal Plasmo Voice proximity traffic. */
+/** Client-side state machine for explicit Voice Messages only. */
 public final class VoiceMessageClient {
     private static final VoiceMessageClient INSTANCE = new VoiceMessageClient();
     private static final long MAX_DURATION_MS = 120_000L;
@@ -9,25 +9,28 @@ public final class VoiceMessageClient {
 
     private VoiceMessageClient() {}
 
-    public static VoiceMessageClient getInstance() { return INSTANCE; }
+    public static VoiceMessageClient getInstance() {
+        return INSTANCE;
+    }
 
     public synchronized boolean startRecording() {
         if (session != null && session.isActive()) return false;
-        session = new RecordingSession();
-        return true;
-    }
 
-    public synchronized void appendSamples(short[] samples, int offset, int length) {
-        if (session == null || !session.isActive()) return;
-        if (session.durationMillis() >= MAX_DURATION_MS) {
-            session.finish();
-            return;
-        }
-        session.appendPcm(samples, offset, length);
+        PlasmoVoiceClientAddon addon = PlasmoVoiceClientAddon.getInstance();
+        if (addon == null || !addon.isAvailable()) return false;
+
+        RecordingSession next = new RecordingSession();
+        addon.startRecording(next);
+        session = next;
+        return true;
     }
 
     public synchronized RecordingSession finishRecording() {
         if (session == null) return null;
+
+        PlasmoVoiceClientAddon addon = PlasmoVoiceClientAddon.getInstance();
+        if (addon != null) addon.stopRecording();
+
         session.finish();
         RecordingSession result = session;
         session = null;
@@ -35,8 +38,16 @@ public final class VoiceMessageClient {
     }
 
     public synchronized void cancelRecording() {
+        PlasmoVoiceClientAddon addon = PlasmoVoiceClientAddon.getInstance();
+        if (addon != null) addon.stopRecording();
         if (session != null) session.cancel();
         session = null;
+    }
+
+    public synchronized void enforceMaximumDuration() {
+        if (session != null && session.isActive() && session.durationMillis() >= MAX_DURATION_MS) {
+            finishRecording();
+        }
     }
 
     public synchronized boolean isRecording() {
