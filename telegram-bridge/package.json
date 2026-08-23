@@ -1,0 +1,10 @@
+{
+  "name": "plasmo-telegram-voice-bridge",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {"node": ">=22"},
+  "scripts": {"build": "tsc --noEmit", "start": "node dist/index.js"},
+  "dependencies": {},
+  "devDependencies": {"typescript": "^5.8.3", "@types/node": "^22.15.0"}
+}
