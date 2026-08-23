@@ -8,10 +8,11 @@
   "license": "MIT",
   "environment": "*",
   "entrypoints": {
-    "main": ["nik200728.tgvoice.TelegramVoiceMod"]
+    "main": ["nik200728.tgvoice.TelegramVoiceMod"],
+    "client": ["nik200728.tgvoice.client.TelegramVoiceClient"]
   },
   "depends": {
-    "fabricloader": ">=0.18.0",
+    "fabricloader": ">=0.18.4",
     "minecraft": "26.1.x",
     "java": ">=25",
     "plasmovoice": ">=2.1.13"
