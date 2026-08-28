@@ -27,7 +27,7 @@ public final class VoiceMessageNetworking {
                     payload.waveform()
             );
 
-            sender.server.getPlayerList().getPlayers().forEach(player -> {
+            sender.getServer().getPlayerList().getPlayers().forEach(player -> {
                 if (ServerPlayNetworking.canSend(player, DeliverVoiceMessagePayload.TYPE)) {
                     ServerPlayNetworking.send(player, outbound);
                 }
