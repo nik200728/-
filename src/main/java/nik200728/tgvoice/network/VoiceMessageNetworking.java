@@ -17,11 +17,16 @@ public final class VoiceMessageNetworking {
     public static void registerServerReceiver() {
         ServerPlayNetworking.registerGlobalReceiver(SendVoiceMessagePayload.TYPE, (payload, context) -> {
             ServerPlayer sender = context.player();
+            long duration = payload.durationMillis();
+            if (duration < 0 || duration > 10 * 60_000L) {
+                return;
+            }
+
             DeliverVoiceMessagePayload outbound = new DeliverVoiceMessagePayload(
                     payload.messageId(),
                     sender.getUUID(),
                     sender.getGameProfile().name(),
-                    Math.toIntExact(payload.durationMillis()),
+                    Math.toIntExact(duration),
                     payload.opusOgg(),
                     payload.waveform()
             );
