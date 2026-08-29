@@ -51,7 +51,11 @@ export async function sendVoice(chatId: number, audio: Buffer, filename = "voice
   if (!API) throw new Error("TELEGRAM_BOT_TOKEN is not configured");
   const form = new FormData();
   form.append("chat_id", String(chatId));
-  form.append("voice", new Blob([audio]), filename);
+  // Node's Blob typings require an ArrayBuffer-backed view here. Copy the
+  // Buffer so SharedArrayBuffer-compatible Node typings cannot leak into Blob.
+  const bytes = new Uint8Array(audio.byteLength);
+  bytes.set(audio);
+  form.append("voice", new Blob([bytes.buffer]), filename);
   const response = await fetch(`${API}/sendVoice`, { method: "POST", body: form });
   if (!response.ok) throw new Error(`Telegram sendVoice HTTP ${response.status}`);
   return response.json();
