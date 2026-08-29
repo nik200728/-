@@ -18,10 +18,10 @@ repositories {
 
 dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
-    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
-    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
-    modCompileOnly "su.plo.voice.api:client:${project.plasmo_voice_api_version}"
-    modCompileOnly "su.plo.voice.api:server:${project.plasmo_voice_api_version}"
+    implementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
+    compileOnly "su.plo.voice.api:client:${project.plasmo_voice_api_version}"
+    compileOnly "su.plo.voice.api:server:${project.plasmo_voice_api_version}"
 }
 
 processResources {
@@ -46,8 +46,4 @@ jar {
     from('LICENSE') {
         rename { "${it}_${project.archives_base_name}" }
     }
-}
-
-tasks.build {
-    dependsOn tasks.remapJar
 }
