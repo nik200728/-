@@ -21,7 +21,7 @@ public final class VoiceMessageNetworking {
                     payload.messageId(),
                     sender.getUUID(),
                     sender.getGameProfile().name(),
-                    payload.durationMillis(),
+                    Math.toIntExact(payload.durationMillis()),
                     payload.opusOgg(),
                     payload.waveform()
             );
