@@ -17,17 +17,16 @@ public final class VoiceMessageNetworking {
     public static void registerServerReceiver() {
         ServerPlayNetworking.registerGlobalReceiver(SendVoiceMessagePayload.TYPE, (payload, context) -> {
             ServerPlayer sender = context.player();
-            // Never trust the UUID supplied by a client. The server identity is authoritative.
             DeliverVoiceMessagePayload outbound = new DeliverVoiceMessagePayload(
                     payload.messageId(),
                     sender.getUUID(),
                     sender.getGameProfile().name(),
-                    (int) payload.durationMillis(),
+                    payload.durationMillis(),
                     payload.opusOgg(),
                     payload.waveform()
             );
 
-            sender.getServer().getPlayerList().getPlayers().forEach(player -> {
+            sender.level().getServer().getPlayerList().getPlayers().forEach(player -> {
                 if (ServerPlayNetworking.canSend(player, DeliverVoiceMessagePayload.TYPE)) {
                     ServerPlayNetworking.send(player, outbound);
                 }
