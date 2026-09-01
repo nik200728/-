@@ -1,6 +1,8 @@
 package nik200728.tgvoice;
 
+import dev.nikita.tgvoice.network.VoiceMessagePayload;
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -10,6 +12,8 @@ public final class TelegramVoiceMod implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        LOGGER.info("Telegram Voice Messages addon initialized; Plasmo Voice proximity audio is left untouched.");
+        PayloadTypeRegistry.serverboundPlay().register(VoiceMessagePayload.TYPE, VoiceMessagePayload.CODEC);
+        PayloadTypeRegistry.clientboundPlay().register(VoiceMessagePayload.TYPE, VoiceMessagePayload.CODEC);
+        LOGGER.info("Telegram Voice Messages initialized; proximity voice packets remain isolated.");
     }
 }
