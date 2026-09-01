@@ -2,6 +2,7 @@ package dev.nikita.tgvoice.client;
 
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
@@ -23,12 +24,12 @@ public final class OpusOggWriter {
 
         byte[] opusHead = new byte[19];
         System.arraycopy("OpusHead".getBytes(StandardCharsets.US_ASCII), 0, opusHead, 0, 8);
-        opusHead[8] = 1; // OpusHead version
-        opusHead[9] = 1; // mono
-        putLe16(opusHead, 10, 0); // pre-skip
+        opusHead[8] = 1;
+        opusHead[9] = 1;
+        putLe16(opusHead, 10, 0);
         putLe32(opusHead, 12, SAMPLE_RATE);
-        putLe16(opusHead, 16, 0); // output gain
-        opusHead[18] = 0; // mono channel mapping family
+        putLe16(opusHead, 16, 0);
+        opusHead[18] = 0;
         writePage(out, serial, sequence++, 0, 0x02, new byte[][]{opusHead});
 
         byte[] vendor = "tgvoice".getBytes(StandardCharsets.UTF_8);
@@ -36,7 +37,7 @@ public final class OpusOggWriter {
         tags.writeBytes("OpusTags".getBytes(StandardCharsets.US_ASCII));
         writeLe32(tags, vendor.length);
         tags.writeBytes(vendor);
-        writeLe32(tags, 0); // user comment count
+        writeLe32(tags, 0);
         writePage(out, serial, sequence++, 0, 0x00, new byte[][]{tags.toByteArray()});
 
         int granule = 0;
@@ -54,16 +55,19 @@ public final class OpusOggWriter {
 
     private static void writePage(ByteArrayOutputStream out, int serial, int sequence,
                                   long granulePosition, int flags, byte[][] packets) {
-        ByteArrayOutputStream page = new ByteArrayOutputStream();
-        page.writeBytes("OggS".getBytes(StandardCharsets.US_ASCII));
-        page.write(0); // stream structure version
-        page.write(flags);
-        writeLe64(page, granulePosition);
-        writeLe32(page, serial);
-        writeLe32(page, sequence);
-        writeLe32(page, 0); // CRC placeholder
+        ByteArrayOutputStream header = new ByteArrayOutputStream();
+        header.writeBytes("OggS".getBytes(StandardCharsets.US_ASCII));
+        header.write(0);
+        header.write(flags);
+        writeLe64(header, granulePosition);
+        writeLe32(header, serial);
+        writeLe32(header, sequence);
+        writeLe32(header, 0);
 
+        ByteArrayOutputStream segments = new ByteArrayOutputStream();
         ByteArrayOutputStream body = new ByteArrayOutputStream();
+        int segmentCount = 0;
+
         for (byte[] packet : packets) {
             if (packet == null || packet.length == 0) {
                 throw new IllegalArgumentException("Empty Opus packet");
@@ -71,48 +75,30 @@ public final class OpusOggWriter {
             int remaining = packet.length;
             int offset = 0;
             while (remaining >= 255) {
-                body.write(255);
+                segments.write(255);
+                segmentCount++;
                 body.write(packet, offset, 255);
                 offset += 255;
                 remaining -= 255;
             }
-            body.write(remaining);
-            body.write(packet, offset, remaining);
-            if (packet.length % 255 == 0) {
-                body.write(0);
-            }
-        }
-
-        int segmentCount = 0;
-        int pos = 27;
-        while (pos < page.size()) {
-            // This writer keeps one packet per page, so lacing values are rebuilt below.
-            break;
-        }
-        byte[] packetData = body.toByteArray();
-        ByteArrayOutputStream segments = new ByteArrayOutputStream();
-        for (byte[] packet : packets) {
-            int remaining = packet.length;
-            while (remaining >= 255) {
-                segments.write(255);
-                segmentCount++;
-                remaining -= 255;
-            }
             segments.write(remaining);
             segmentCount++;
+            body.write(packet, offset, remaining);
             if (packet.length % 255 == 0) {
+                // A zero lacing value terminates a packet whose size is an exact multiple of 255.
                 segments.write(0);
                 segmentCount++;
             }
         }
 
-        byte[] header = page.toByteArray();
-        header = java.util.Arrays.copyOf(header, 27 + segmentCount);
-        header[26] = (byte) segmentCount;
-        System.arraycopy(segments.toByteArray(), 0, header, 27, segmentCount);
-        byte[] full = new byte[header.length + packetData.length];
-        System.arraycopy(header, 0, full, 0, header.length);
-        System.arraycopy(packetData, 0, full, header.length, packetData.length);
+        byte[] pageHeader = Arrays.copyOf(header.toByteArray(), 27 + segmentCount);
+        pageHeader[26] = (byte) segmentCount;
+        System.arraycopy(segments.toByteArray(), 0, pageHeader, 27, segmentCount);
+
+        byte[] packetData = body.toByteArray();
+        byte[] full = new byte[pageHeader.length + packetData.length];
+        System.arraycopy(pageHeader, 0, full, 0, pageHeader.length);
+        System.arraycopy(packetData, 0, full, pageHeader.length, packetData.length);
 
         int crc = oggCrc(full);
         full[22] = (byte) crc;
@@ -145,11 +131,6 @@ public final class OpusOggWriter {
         data[offset + 1] = (byte) (value >>> 8);
         data[offset + 2] = (byte) (value >>> 16);
         data[offset + 3] = (byte) (value >>> 24);
-    }
-
-    private static void writeLe16(ByteArrayOutputStream out, int value) {
-        out.write(value & 0xFF);
-        out.write((value >>> 8) & 0xFF);
     }
 
     private static void writeLe32(ByteArrayOutputStream out, int value) {
