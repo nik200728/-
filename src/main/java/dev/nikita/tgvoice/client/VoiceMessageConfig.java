@@ -14,11 +14,14 @@ public final class VoiceMessageConfig {
     private static final Gson GSON = new GsonBuilder().setPrettyPrinting().create();
     private static final Path PATH = FabricLoader.getInstance().getConfigDir().resolve("tgvoice.json");
     private static final int DEFAULT_MAX_DURATION_SECONDS = 120;
+    private static final float DEFAULT_PLAYBACK_VOLUME = 1.0f;
 
     private static VoiceMessageConfig instance;
 
     public boolean toggleMode = false;
     public int maxDurationSeconds = DEFAULT_MAX_DURATION_SECONDS;
+    /** Addon-owned playback gain. 1.0 is unchanged, 0.0 is muted. */
+    public float playbackVolume = DEFAULT_PLAYBACK_VOLUME;
 
     private VoiceMessageConfig() {}
 
@@ -29,6 +32,7 @@ public final class VoiceMessageConfig {
 
     public synchronized void save() {
         maxDurationSeconds = clamp(maxDurationSeconds, 1, DEFAULT_MAX_DURATION_SECONDS);
+        playbackVolume = clamp(playbackVolume, 0.0f, 2.0f);
         try {
             Files.createDirectories(PATH.getParent());
             Files.writeString(PATH, GSON.toJson(this), StandardCharsets.UTF_8);
@@ -41,6 +45,10 @@ public final class VoiceMessageConfig {
         return clamp(maxDurationSeconds, 1, DEFAULT_MAX_DURATION_SECONDS) * 1000L;
     }
 
+    public float playbackVolume() {
+        return clamp(playbackVolume, 0.0f, 2.0f);
+    }
+
     private static VoiceMessageConfig load() {
         if (!Files.isRegularFile(PATH)) {
             VoiceMessageConfig config = new VoiceMessageConfig();
@@ -51,6 +59,7 @@ public final class VoiceMessageConfig {
             VoiceMessageConfig config = GSON.fromJson(Files.readString(PATH, StandardCharsets.UTF_8), VoiceMessageConfig.class);
             if (config == null) config = new VoiceMessageConfig();
             config.maxDurationSeconds = clamp(config.maxDurationSeconds, 1, DEFAULT_MAX_DURATION_SECONDS);
+            config.playbackVolume = clamp(config.playbackVolume, 0.0f, 2.0f);
             return config;
         } catch (Exception exception) {
             System.err.println("[tgvoice] Failed to read config, using defaults: " + exception.getMessage());
@@ -59,6 +68,11 @@ public final class VoiceMessageConfig {
     }
 
     private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private static float clamp(float value, float min, float max) {
+        if (!Float.isFinite(value)) return min;
         return Math.max(min, Math.min(max, value));
     }
 }
