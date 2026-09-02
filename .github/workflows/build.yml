@@ -2,9 +2,9 @@ name: Build
 
 on:
   push:
-    branches: ["master", "voice-messages", "voice-capture-v2"]
+    branches: ["master", "voice-messages", "voice-capture-v2", "video-webcam-capture"]
   pull_request:
-    branches: ["master", "voice-messages", "voice-capture-v2"]
+    branches: ["master", "voice-messages", "voice-capture-v2", "video-webcam-capture"]
   workflow_dispatch:
 
 jobs:
@@ -40,3 +40,4 @@ jobs:
           node-version: '22'
       - run: npm install
       - run: npm run build
+      - run: npm test
