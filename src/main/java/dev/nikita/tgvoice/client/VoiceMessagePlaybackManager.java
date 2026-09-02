@@ -45,13 +45,19 @@ public final class VoiceMessagePlaybackManager {
         PlasmoVoiceClientAddon addon = PlasmoVoiceClientAddon.getInstance();
         if (addon == null) return;
 
-        VoiceMessagePlayback playback = new VoiceMessagePlayback(addon.voiceClientForPlayback());
-        playback.load(payload.durationMillis(), payload.opusData());
-
         synchronized (PLAYBACKS) {
-            VoiceMessagePlayback previous = PLAYBACKS.put(payload.messageId(), playback);
+            // Inbox delivery is at-least-once: an acknowledgement can be lost after
+            // the client has already received the packet. Never create a second
+            // playback instance for the same unified messageId.
+            if (PAYLOADS.containsKey(payload.messageId())) {
+                lastReceivedMessageId = payload.messageId();
+                return;
+            }
+
+            VoiceMessagePlayback playback = new VoiceMessagePlayback(addon.voiceClientForPlayback());
+            playback.load(payload.durationMillis(), payload.opusData());
+            PLAYBACKS.put(payload.messageId(), playback);
             PAYLOADS.put(payload.messageId(), payload);
-            if (previous != null) previous.stop();
             lastReceivedMessageId = payload.messageId();
         }
     }
