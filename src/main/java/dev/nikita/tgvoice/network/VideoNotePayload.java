@@ -82,6 +82,14 @@ public record VideoNotePayload(
             throw new IllegalArgumentException("invalid video payload");
         }
         videoData = Arrays.copyOf(videoData, videoData.length);
+
+        // The network contract carries our versioned container, not an arbitrary byte blob.
+        // Decode once at the boundary so malformed or incompatible video never reaches UI/storage.
+        VideoNoteContainer.Video container = VideoNoteContainer.decode(videoData);
+        if (container.width() != width || container.height() != height
+                || container.frameRate() != frameRate || container.durationMillis() != durationMillis) {
+            throw new IllegalArgumentException("video metadata does not match container");
+        }
     }
 
     @Override
