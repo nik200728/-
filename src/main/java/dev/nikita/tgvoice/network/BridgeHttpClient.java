@@ -14,10 +14,17 @@ import java.util.Base64;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 /** HTTP transport between the Minecraft server and the external Telegram bridge. */
 public final class BridgeHttpClient {
+    private static final int MAX_SEND_ATTEMPTS = 4;
+    private static final long[] RETRY_DELAYS_MS = {500L, 1000L, 2000L};
+
     private final HttpClient client;
+    private final ScheduledExecutorService retryExecutor;
     private final URI endpoint, inboxEndpoint, inboxAckEndpoint, linkCodeEndpoint, linkUnlinkEndpoint, linkStatusEndpoint, chatEndpoint;
     private final String token;
 
@@ -33,6 +40,11 @@ public final class BridgeHttpClient {
         linkStatusEndpoint = URI.create(base + "/v1/link/status");
         chatEndpoint = URI.create(base + "/v1/chat");
         client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+        retryExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread thread = new Thread(r, "tgvoice-bridge-retry");
+            thread.setDaemon(true);
+            return thread;
+        });
     }
 
     public boolean isConfigured() { return !token.isBlank() && token.length() >= 32; }
@@ -40,7 +52,58 @@ public final class BridgeHttpClient {
     public CompletableFuture<Void> send(VoiceMessagePayload payload) {
         if (!isConfigured()) return CompletableFuture.failedFuture(new IllegalStateException("Bridge token is not configured"));
         String json = "{\"messageId\":\"" + escape(payload.messageId()) + "\",\"minecraftUuid\":\"" + payload.senderUuid() + "\",\"durationMs\":" + payload.durationMillis() + ",\"audioBase64\":\"" + Base64.getEncoder().encodeToString(payload.opusData()) + "\"}";
-        return client.sendAsync(authorizedPost(endpoint, json, Duration.ofSeconds(30)), HttpResponse.BodyHandlers.discarding()).thenApply(response -> require2xxValue(response, "Bridge returned HTTP "));
+        return sendVoiceWithRetry(json, 1);
+    }
+
+    private CompletableFuture<Void> sendVoiceWithRetry(String json, int attempt) {
+        return client.sendAsync(authorizedPost(endpoint, json, Duration.ofSeconds(30)), HttpResponse.BodyHandlers.discarding())
+                .handle((response, error) -> {
+                    if (error != null) {
+                        if (attempt < MAX_SEND_ATTEMPTS) {
+                            scheduleRetry(json, attempt + 1);
+                        }
+                        throw new SendAttemptException(error, true);
+                    }
+                    if (response.statusCode() >= 500 && attempt < MAX_SEND_ATTEMPTS) {
+                        scheduleRetry(json, attempt + 1);
+                        throw new SendAttemptException(new IllegalStateException("Bridge returned HTTP " + response.statusCode()), true);
+                    }
+                    if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                        throw new SendAttemptException(new IllegalStateException("Bridge returned HTTP " + response.statusCode()), false);
+                    }
+                    return (Void) null;
+                })
+                .handle((value, error) -> {
+                    if (error == null) return CompletableFuture.<Void>completedFuture(null);
+                    Throwable cause = unwrap(error);
+                    if (cause instanceof SendAttemptException retryable) {
+                        if (!retryable.retryScheduled()) {
+                            return CompletableFuture.<Void>failedFuture(retryable.getCause());
+                        }
+                        return retryFuture(json, attempt + 1);
+                    }
+                    return CompletableFuture.<Void>failedFuture(cause);
+                })
+                .thenCompose(future -> future);
+    }
+
+    private void scheduleRetry(String json, int nextAttempt) {
+        // Scheduling is performed by retryFuture; this method exists only to keep the
+        // attempt handler free of blocking sleeps.
+    }
+
+    private CompletableFuture<Void> retryFuture(String json, int nextAttempt) {
+        if (nextAttempt > MAX_SEND_ATTEMPTS) {
+            return CompletableFuture.failedFuture(new IllegalStateException("Bridge voice delivery failed after " + MAX_SEND_ATTEMPTS + " attempts"));
+        }
+        CompletableFuture<Void> result = new CompletableFuture<>();
+        long delay = RETRY_DELAYS_MS[Math.min(nextAttempt - 2, RETRY_DELAYS_MS.length - 1)];
+        retryExecutor.schedule(() -> sendVoiceWithRetry(json, nextAttempt)
+                .whenComplete((ignored, error) -> {
+                    if (error == null) result.complete(null);
+                    else result.completeExceptionally(error);
+                }), delay, TimeUnit.MILLISECONDS);
+        return result;
     }
 
     public CompletableFuture<LinkCode> createLinkCode(UUID minecraftUuid) {
@@ -115,4 +178,11 @@ public final class BridgeHttpClient {
     }
     private static String setting(String property, String env, String fallback) { String value = System.getProperty(property); if (value != null && !value.isBlank()) return value; value = System.getenv(env); return value == null ? fallback : value; }
     private static String escape(String value) { return value.replace("\\", "\\\\").replace("\"", "\\\""); }
+    private static Throwable unwrap(Throwable error) { return error.getCause() == null ? error : error.getCause(); }
+
+    private static final class SendAttemptException extends RuntimeException {
+        private final boolean retryScheduled;
+        private SendAttemptException(Throwable cause, boolean retryScheduled) { super(cause); this.retryScheduled = retryScheduled; }
+        private boolean retryScheduled() { return retryScheduled; }
+    }
 }
