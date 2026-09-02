@@ -16,5 +16,6 @@ public final class TelegramVoiceClient implements ClientModInitializer {
         PlasmoVoiceClient.getAddonsLoader().load(new PlasmoVoiceClientAddon());
         VoiceMessageInputController.register();
         VoiceMessagePlaybackManager.register();
+        VoiceMessageUiController.register();
     }
 }
