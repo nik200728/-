@@ -1,6 +1,8 @@
 {
   "key.tgvoice.record": "Record voice message",
+  "key.tgvoice.cancel": "Cancel voice message",
   "key.tgvoice.open_messages": "Open voice messages",
+  "key.tgvoice.settings": "Voice message settings",
   "screen.tgvoice.voice_messages": "Voice messages",
   "screen.tgvoice.message_unavailable": "Voice message unavailable",
   "screen.tgvoice.play": "Play",
