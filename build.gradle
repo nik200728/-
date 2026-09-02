@@ -22,6 +22,10 @@ dependencies {
     implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
     compileOnly "su.plo.voice.api:client:${project.plasmo_voice_api_version}"
     compileOnly "su.plo.voice.api:server:${project.plasmo_voice_api_version}"
+
+    // Webcam capture with platform binaries bundled into the mod jar.
+    implementation "org.openpnp:openpnp-capture-java:${project.openpnp_capture_version}"
+    include "org.openpnp:openpnp-capture-java:${project.openpnp_capture_version}"
 }
 
 processResources {
