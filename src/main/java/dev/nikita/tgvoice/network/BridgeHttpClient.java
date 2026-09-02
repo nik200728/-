@@ -1,23 +1,33 @@
 package dev.nikita.tgvoice.network;
 
+import com.google.gson.JsonArray;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Base64;
+import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
-/** Sends explicit Voice Messages from the Minecraft server to the external bridge. */
+/** HTTP transport between the Minecraft server and the external Telegram bridge. */
 public final class BridgeHttpClient {
     private final HttpClient client;
     private final URI endpoint;
+    private final URI inboxEndpoint;
     private final String token;
 
     public BridgeHttpClient() {
         String url = setting("tgvoice.bridge.url", "TGVOICE_BRIDGE_URL", "http://127.0.0.1:8787");
         this.token = setting("tgvoice.bridge.token", "TGVOICE_BRIDGE_TOKEN", "");
-        this.endpoint = URI.create(url.endsWith("/") ? url + "v1/messages" : url + "/v1/messages");
+        String base = url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
+        this.endpoint = URI.create(base + "/v1/messages");
+        this.inboxEndpoint = URI.create(base + "/v1/inbox");
         this.client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     }
 
@@ -50,6 +60,64 @@ public final class BridgeHttpClient {
                     return CompletableFuture.failedFuture(
                             new IllegalStateException("Bridge returned HTTP " + response.statusCode()));
                 });
+    }
+
+    /** Atomically drains the Bridge inbox for one linked Minecraft UUID. */
+    public CompletableFuture<List<InboundVoiceMessage>> pollInbox(UUID minecraftUuid) {
+        if (!isConfigured()) {
+            return CompletableFuture.failedFuture(new IllegalStateException("Bridge token is not configured"));
+        }
+
+        URI uri = URI.create(inboxEndpoint + "?minecraftUuid=" + minecraftUuid);
+        HttpRequest request = HttpRequest.newBuilder(uri)
+                .timeout(Duration.ofSeconds(10))
+                .header("Authorization", "Bearer " + token)
+                .GET()
+                .build();
+
+        return client.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                .thenCompose(response -> {
+                    if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                        return CompletableFuture.failedFuture(
+                                new IllegalStateException("Bridge inbox returned HTTP " + response.statusCode()));
+                    }
+                    try {
+                        JsonObject root = JsonParser.parseString(response.body()).getAsJsonObject();
+                        JsonArray array = root.getAsJsonArray("messages");
+                        List<InboundVoiceMessage> result = new ArrayList<>();
+                        if (array != null) {
+                            for (var element : array) {
+                                JsonObject item = element.getAsJsonObject();
+                                String messageId = item.get("messageId").getAsString();
+                                String telegramUserId = item.get("telegramUserId").getAsString();
+                                long durationMs = item.get("durationMs").getAsLong();
+                                byte[] audio = Base64.getDecoder().decode(item.get("audioBase64").getAsString());
+                                result.add(new InboundVoiceMessage(messageId, telegramUserId, durationMs, audio));
+                            }
+                        }
+                        return CompletableFuture.completedFuture(List.copyOf(result));
+                    } catch (RuntimeException exception) {
+                        return CompletableFuture.failedFuture(
+                                new IllegalStateException("Invalid Bridge inbox response", exception));
+                    }
+                });
+    }
+
+    public record InboundVoiceMessage(String messageId, String telegramUserId, long durationMs, byte[] audio) {
+        public InboundVoiceMessage {
+            if (messageId == null || messageId.isBlank() || messageId.length() > 128) {
+                throw new IllegalArgumentException("invalid inbound messageId");
+            }
+            if (telegramUserId == null || telegramUserId.isBlank()) {
+                throw new IllegalArgumentException("invalid telegramUserId");
+            }
+            if (durationMs < 1 || durationMs > VoiceMessagePayload.MAX_DURATION_MILLIS) {
+                throw new IllegalArgumentException("invalid inbound duration");
+            }
+            if (audio == null || audio.length == 0 || audio.length > VoiceMessagePayload.MAX_AUDIO_BYTES) {
+                throw new IllegalArgumentException("invalid inbound audio");
+            }
+        }
     }
 
     private static String setting(String property, String env, String fallback) {
