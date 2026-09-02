@@ -3,6 +3,7 @@ package nik200728.tgvoice;
 import dev.nikita.tgvoice.network.BridgeHttpClient;
 import dev.nikita.tgvoice.network.ServerMessageRouter;
 import dev.nikita.tgvoice.network.VoiceMessagePayload;
+import dev.nikita.tgvoice.server.TelegramVoiceCommands;
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
@@ -34,6 +35,7 @@ public final class TelegramVoiceMod implements ModInitializer {
         PayloadTypeRegistry.clientboundPlay().register(VoiceMessagePayload.TYPE, VoiceMessagePayload.CODEC);
 
         bridgeClient = new BridgeHttpClient();
+        TelegramVoiceCommands.register(bridgeClient);
         messageRouter = new ServerMessageRouter(4096, payload -> bridgeClient.send(payload)
                 .exceptionally(error -> {
                     LOGGER.error("Voice Message {} failed to reach bridge", payload.messageId(), error);
@@ -107,8 +109,6 @@ public final class TelegramVoiceMod implements ModInitializer {
                                         if (ackError != null) {
                                             LOGGER.warn("Failed to acknowledge Telegram Voice Message {}: {}",
                                                     message.messageId(), ackError.getMessage());
-                                            INBOX_DELIVERIES_IN_FLIGHT.remove(deliveryKey);
-                                            return;
                                         }
                                         INBOX_DELIVERIES_IN_FLIGHT.remove(deliveryKey);
                                     });
