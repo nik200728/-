@@ -1,10 +1,8 @@
 package dev.nikita.tgvoice.client;
 
 import dev.nikita.tgvoice.network.VoiceMessagePayload;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.minecraft.client.Minecraft;
-import su.plo.voice.api.client.PlasmoVoiceClient;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -33,13 +31,9 @@ public final class VoiceMessagePlaybackManager {
     }
 
     public static void receive(VoiceMessagePayload payload) {
-        Minecraft client = Minecraft.getInstance();
-        PlasmoVoiceClient.getAddonsLoader();
-
         PlasmoVoiceClientAddon addon = PlasmoVoiceClientAddon.getInstance();
         if (addon == null) return;
 
-        // The addon owns the injected PV client; expose it only through a small helper.
         VoiceMessagePlayback playback = new VoiceMessagePlayback(addon.voiceClientForPlayback());
         playback.load(payload.durationMillis(), payload.opusData());
 
@@ -51,9 +45,7 @@ public final class VoiceMessagePlaybackManager {
     }
 
     public static VoiceMessagePlayback get(String messageId) {
-        synchronized (PLAYBACKS) {
-            return PLAYBACKS.get(messageId);
-        }
+        synchronized (PLAYBACKS) { return PLAYBACKS.get(messageId); }
     }
 
     public static String lastReceivedMessageId() { return lastReceivedMessageId; }
@@ -84,8 +76,6 @@ public final class VoiceMessagePlaybackManager {
     }
 
     private static void tick() {
-        synchronized (PLAYBACKS) {
-            PLAYBACKS.values().forEach(VoiceMessagePlayback::tick);
-        }
+        synchronized (PLAYBACKS) { PLAYBACKS.values().forEach(VoiceMessagePlayback::tick); }
     }
 }
