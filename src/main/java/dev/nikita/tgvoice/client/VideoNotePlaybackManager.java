@@ -14,7 +14,9 @@ public final class VideoNotePlaybackManager {
     private final Map<String, VideoNotePlayback> playbacks = new LinkedHashMap<>(16, 0.75f, true) {
         @Override
         protected boolean removeEldestEntry(Map.Entry<String, VideoNotePlayback> eldest) {
-            return size() > MAX_PLAYBACKS;
+            if (size() <= MAX_PLAYBACKS) return false;
+            eldest.getValue().stop();
+            return true;
         }
     };
 
@@ -57,10 +59,13 @@ public final class VideoNotePlaybackManager {
     }
 
     public synchronized void remove(String messageId) {
-        if (messageId != null) playbacks.remove(messageId);
+        if (messageId == null) return;
+        VideoNotePlayback playback = playbacks.remove(messageId);
+        if (playback != null) playback.stop();
     }
 
     public synchronized void clear() {
+        for (VideoNotePlayback playback : playbacks.values()) playback.stop();
         playbacks.clear();
     }
 }
