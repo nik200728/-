@@ -21,14 +21,17 @@ Do not claim a feature is implemented merely because transport models, UI, or ma
 - `VideoNoteContainer` validates/encodes/decodes bounded timestamped frames.
 - Server-side video-note transport/broadcast exists.
 - Client-side receive, playback timeline, frame cache, texture upload and custom video-note UI exist.
-- **Real camera capture is NOT considered implemented until an actual webcam capture backend is present and tested on Minecraft 26.1.2.**
+- **A real webcam capture implementation is now present:** `WebcamCaptureService` uses the OpenPnP Capture Java bindings, opens the first detected camera, selects a bounded capture format, crops/scales frames to 512x512 and JPEG-encodes them.
+- `VideoNoteRecorder` captures on a daemon thread at 15 FPS, caps recording at 60 seconds, bounds individual JPEG frames and packages them as TGV1.
+- `VideoNoteCaptureController` exposes a separate hold-to-record V key so webcam capture does not steal the left mouse button used by the voice-message PTT gesture.
+- **Camera capture is not yet considered verified:** the dependency, native backend loading, actual camera enumeration and recording must pass a real Minecraft 26.1.2/Java 25 runtime test on a machine with a webcam.
 - The bridge now has an outbound `/v1/video-notes` path and Telegram `sendVideoNote` integration.
 - The bridge now converts Minecraft `TGV1` frames to MP4 for Telegram using configurable `ffmpeg`/`ffprobe` executables.
 - The bridge now downloads inbound Telegram `video_note` media, converts MP4 into bounded `TGV1` frames, queues it, and exposes it through the existing inbox endpoint.
 - Minecraft `BridgeHttpClient` now parses both voice and video inbox messages, and the server delivers inbound video notes to the player.
 - Bridge HTTP body handling allows a 12 MiB JSON envelope so an 8 MiB binary video payload can survive base64 expansion.
-- Bridge validation tests now cover accepted bounds, oversized payloads, duration/FPS limits and dimensions.
-- **This is implemented as a bridge path, but must still be verified by an actual build and live Telegram round-trip.**
+- Bridge validation tests cover accepted bounds, oversized payloads, duration/FPS limits and dimensions.
+- **The video bridge path is implemented but must still be verified by an actual build and live Telegram round-trip.**
 
 ## Single-player test matrix
 The mod has both common (`main`) and client entrypoints, so its common server-side code can run inside Minecraft's integrated single-player server when the mod is installed in the client instance. A single-player world is therefore useful for local smoke tests, but it cannot prove multi-player synchronization.
@@ -38,6 +41,7 @@ The mod has both common (`main`) and client entrypoints, so its common server-si
 - Plasmo Voice initialization/handshake in an integrated server setup, provided Plasmo Voice is installed and compatible.
 - Voice-message UI, keybinds, recording lifecycle and local playback.
 - Voice-message packet serialization/validation and integrated-server transport.
+- Local webcam detection, video-note recording lifecycle and TGV1 generation, provided a real webcam is available.
 - Local video-note receive/playback/rendering when a valid `VideoNotePayload` is produced by the implemented path.
 - Resource cleanup and client lifecycle.
 
@@ -55,7 +59,7 @@ The mod has both common (`main`) and client entrypoints, so its common server-si
 - `ffmpeg` and `ffprobe` installed on the bridge host (or configured through `FFMPEG_PATH` / `FFPROBE_PATH`).
 
 ### What still requires real hardware/software validation
-- Webcam capture on the target machine.
+- Actual webcam capture on the target machine using OpenPnP native capture.
 - Final Gradle/TypeScript builds and runtime compatibility checks.
 - Live Telegram video-note round-trip with real MP4 media and the bridge's ffmpeg toolchain.
 
@@ -68,6 +72,8 @@ The mod has both common (`main`) and client entrypoints, so its common server-si
 - Use bounded queues/caches and validate message size, duration, dimensions, frame rate and timestamps.
 - Network failures must not crash the Minecraft client or bridge.
 - Clean up NativeImage/DynamicTexture/audio resources.
+- Webcam capture must remain on a worker thread and must not block the Minecraft render/tick thread.
+- The webcam recording gesture uses V instead of LMB specifically to avoid conflict with voice-message PTT and Plasmo Voice input.
 
 ## Required audit sequence
 1. Inspect the complete repository and map all client/server/bridge paths.
@@ -80,18 +86,21 @@ The mod has both common (`main`) and client entrypoints, so its common server-si
 8. Review packet validation and server authority.
 9. Review voice recording/playback end-to-end.
 10. Review Telegram voice send/receive end-to-end.
-11. Implement and test a real webcam capture backend if still missing.
-12. Test Telegram video_note MP4-to-TGV1 conversion and Minecraft delivery with real media.
-13. Review video frame encoding/decoding, timing, cache and texture lifecycle.
-14. Test local video notes without Telegram linking.
-15. Test simultaneous Plasmo Voice proximity audio and media messages.
-16. Test reconnects, duplicate messages, malformed payloads and oversized media.
-17. Only after all checks pass, update this document's status to reflect verified behavior.
+11. Test the OpenPnP webcam backend on the target Minecraft/Java runtime.
+12. Test webcam recording, stop/cancel behavior and TGV1 generation with real camera frames.
+13. Test Telegram video_note MP4-to-TGV1 conversion and Minecraft delivery with real media.
+14. Review video frame encoding/decoding, timing, cache and texture lifecycle.
+15. Test local video notes without Telegram linking.
+16. Test simultaneous Plasmo Voice proximity audio and media messages.
+17. Test reconnects, duplicate messages, malformed payloads and oversized media.
+18. Only after all checks pass, update this document's status to reflect verified behavior.
 
 ## Known areas requiring special attention
-- `VideoNoteTextureManager` currently decodes encoded frames into a `DynamicTexture`; verify the exact 26.1.2 texture API and ensure the displayed frame receives the intended circular mask.
+- `VideoNoteTextureManager` decodes encoded frames into a `DynamicTexture` and applies the circular alpha mask before upload; verify the exact 26.1.2 texture API and GPU resource lifecycle.
 - `VideoNoteFrameCache` uses decoded `NativeImage` frames and applies a circular alpha mask; verify all NativeImage pixel APIs against the target mappings.
 - The client video tick currently advances by a fixed 50 ms; consider using the actual client tick delta if required for accurate timing.
+- `WebcamCaptureService` currently selects the first detected camera and a bounded format. A future settings UI should allow explicit camera/format selection rather than assuming device 0.
+- `VideoNoteRecorder` currently drops frames that exceed the per-frame bound; inspect whether the UI should surface this as degraded capture rather than silently dropping frames.
 - Bridge state is persisted as JSON; inspect growth, atomicity and failure recovery.
 - Bridge HTTP request limits and Telegram media limits must be consistent. The Minecraft video payload is capped at 8 MiB, while its JSON/base64 representation needs a larger HTTP request envelope.
 - `telegram-bridge/src/video.test.ts` uses Node's built-in test runner; the test command requires Node 22+ and does not exercise native ffmpeg/ffprobe conversion.
