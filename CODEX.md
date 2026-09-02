@@ -21,7 +21,11 @@ Do not claim a feature is implemented merely because transport models, UI, or ma
 - Server-side video-note transport/broadcast exists.
 - Client-side receive, playback timeline, frame cache, texture upload and custom video-note UI exist.
 - **Real camera capture is NOT considered implemented until an actual webcam capture backend is present and tested on Minecraft 26.1.2.**
-- The bridge now has an outbound `/v1/video-notes` path and Telegram `sendVideoNote` integration, plus inbound `message.video_note` detection and download scaffolding. **This is NOT considered end-to-end Telegram video-note support yet:** downloaded Telegram MP4 still needs conversion into the Minecraft `TGV1` frame container and delivery into the Minecraft inbox/network path.
+- The bridge now has an outbound `/v1/video-notes` path and Telegram `sendVideoNote` integration.
+- The bridge now converts Minecraft `TGV1` frames to MP4 for Telegram using configurable `ffmpeg`/`ffprobe` executables.
+- The bridge now downloads inbound Telegram `video_note` media, converts MP4 into bounded `TGV1` frames, queues it, and exposes it through the existing inbox endpoint.
+- Minecraft `BridgeHttpClient` now parses both voice and video inbox messages, and the server delivers inbound video notes to the player.
+- **This is implemented as a bridge path, but must still be verified by an actual build and live Telegram round-trip.**
 
 ## Single-player test matrix
 The mod has both common (`main`) and client entrypoints, so its common server-side code can run inside Minecraft's integrated single-player server when the mod is installed in the client instance. A single-player world is therefore useful for local smoke tests, but it cannot prove multi-player synchronization.
@@ -45,11 +49,12 @@ The mod has both common (`main`) and client entrypoints, so its common server-si
 - Sending Minecraft voice/video notes to Telegram.
 - Receiving Telegram voice/video notes in Minecraft.
 - Telegram-side authentication, polling and persistence behavior.
+- `ffmpeg` and `ffprobe` installed on the bridge host (or configured through `FFMPEG_PATH` / `FFPROBE_PATH`).
 
 ### What still requires real hardware/software validation
 - Webcam capture on the target machine.
-- Telegram MP4 video-note decoding/conversion into `TGV1` frames.
 - Final Gradle/TypeScript builds and runtime compatibility checks.
+- Live Telegram video-note round-trip with real MP4 media and the bridge's ffmpeg toolchain.
 
 ## Architecture constraints
 - Do not replace or fork Plasmo Voice's proximity voice protocol.
@@ -73,7 +78,7 @@ The mod has both common (`main`) and client entrypoints, so its common server-si
 9. Review voice recording/playback end-to-end.
 10. Review Telegram voice send/receive end-to-end.
 11. Implement and test a real webcam capture backend if still missing.
-12. Complete and test Telegram video_note MP4-to-TGV1 conversion and Minecraft delivery.
+12. Test Telegram video_note MP4-to-TGV1 conversion and Minecraft delivery with real media.
 13. Review video frame encoding/decoding, timing, cache and texture lifecycle.
 14. Test local video notes without Telegram linking.
 15. Test simultaneous Plasmo Voice proximity audio and media messages.
@@ -85,7 +90,7 @@ The mod has both common (`main`) and client entrypoints, so its common server-si
 - `VideoNoteFrameCache` uses decoded `NativeImage` frames and applies a circular alpha mask; verify all NativeImage pixel APIs against the target mappings.
 - The client video tick currently advances by a fixed 50 ms; consider using the actual client tick delta if required for accurate timing.
 - Bridge state is persisted as JSON; inspect growth, atomicity and failure recovery.
-- Bridge HTTP request limits and Telegram media limits must be consistent.
+- Bridge HTTP request limits and Telegram media limits must be consistent. The Minecraft video payload is capped at 8 MiB, while its JSON/base64 representation needs a larger HTTP request envelope.
 
 ## Definition of done
 A feature is complete only when its full path is implemented, compiles, and has been tested as far as the environment permits. If hardware-dependent camera testing cannot be performed, report that explicitly instead of pretending it passed.
