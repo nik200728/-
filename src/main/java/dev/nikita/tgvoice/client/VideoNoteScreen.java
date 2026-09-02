@@ -65,7 +65,7 @@ public final class VideoNoteScreen extends Screen {
         int cy = top + 148;
         int imageLeft = cx - VIDEO_RADIUS;
         int imageTop = cy - VIDEO_RADIUS;
-        Identifier texture = textureManager.upload(playback.currentFrame().encodedImage(), state.width(), state.height());
+        Identifier texture = textureManager.upload(state.frame());
 
         graphics.fill(imageLeft - 6, imageTop - 6, imageLeft + VIDEO_SIZE + 6, imageTop + VIDEO_SIZE + 6, 0xFF303A49);
         graphics.blit(RenderPipelines.GUI_TEXTURED, texture, imageLeft, imageTop,
