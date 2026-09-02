@@ -13,11 +13,7 @@ import su.plo.voice.api.event.EventSubscribe;
 import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Real Plasmo Voice client integration.
- * It consumes PCM from PV's existing capture pipeline and never creates a
- * second microphone stream or sends Voice Message audio through proximity voice.
- */
+/** Real Plasmo Voice client integration for explicit Voice Messages. */
 @Addon(
         id = "pv-addon-tgvoice",
         name = "Telegram Voice Messages",
@@ -34,13 +30,9 @@ public final class PlasmoVoiceClientAddon implements AddonInitializer {
 
     private volatile RecordingSession recordingSession;
 
-    public PlasmoVoiceClientAddon() {
-        instance = this;
-    }
+    public PlasmoVoiceClientAddon() { instance = this; }
 
-    public static PlasmoVoiceClientAddon getInstance() {
-        return instance;
-    }
+    public static PlasmoVoiceClientAddon getInstance() { return instance; }
 
     @Override
     public void onAddonInitialize() {
@@ -56,40 +48,27 @@ public final class PlasmoVoiceClientAddon implements AddonInitializer {
     }
 
     public void startRecording(RecordingSession session) {
-        if (session == null || !session.isActive()) {
-            throw new IllegalArgumentException("Recording session must be active");
-        }
-        if (voiceClient == null) {
-            throw new IllegalStateException("Plasmo Voice client API is not initialized");
-        }
+        if (session == null || !session.isActive()) throw new IllegalArgumentException("Recording session must be active");
+        if (voiceClient == null) throw new IllegalStateException("Plasmo Voice client API is not initialized");
         recordingSession = session;
     }
 
-    public void stopRecording() {
-        recordingSession = null;
+    public void stopRecording() { recordingSession = null; }
+
+    public boolean isAvailable() { return voiceClient != null; }
+
+    /** Exposes the injected PV client to the addon-owned playback manager only. */
+    public PlasmoVoiceClient voiceClientForPlayback() {
+        if (voiceClient == null) throw new IllegalStateException("Plasmo Voice client API is not initialized");
+        return voiceClient;
     }
 
-    public boolean isAvailable() {
-        return voiceClient != null;
-    }
-
-    /**
-     * Encodes the completed recording with a fresh encoder created by Plasmo Voice.
-     * The normal proximity encoder is never reused or reset, so the addon cannot
-     * corrupt the active proximity-voice encoder state.
-     */
     public byte[] encodeAsOggOpus(RecordingSession session) {
-        if (voiceClient == null) {
-            throw new IllegalStateException("Plasmo Voice client API is not initialized");
-        }
-        if (session == null) {
-            throw new IllegalArgumentException("Recording session is required");
-        }
+        if (voiceClient == null) throw new IllegalStateException("Plasmo Voice client API is not initialized");
+        if (session == null) throw new IllegalArgumentException("Recording session is required");
 
         byte[] pcm = session.pcm16le();
-        if (pcm.length < 2) {
-            throw new IllegalArgumentException("Recording contains no PCM audio");
-        }
+        if (pcm.length < 2) throw new IllegalArgumentException("Recording contains no PCM audio");
 
         AudioEncoder encoder = voiceClient.getServerInfo()
                 .orElseThrow(() -> new IllegalStateException("Plasmo Voice server is not connected"))
@@ -106,31 +85,22 @@ public final class PlasmoVoiceClientAddon implements AddonInitializer {
                     int pcmOffset = (offset + i) * 2;
                     frame[i] = (short) ((pcm[pcmOffset] & 0xFF) | (pcm[pcmOffset + 1] << 8));
                 }
-                // PV's Opus encoder expects 20 ms / 48 kHz frames.
                 packets.add(encoder.encode(frame));
             }
             return OpusOggWriter.write(packets, totalSamples);
         } catch (Exception e) {
             throw new IllegalStateException("Failed to encode voice message with Plasmo Voice", e);
         } finally {
-            try {
-                encoder.close();
-            } catch (Exception e) {
-                LOGGER.warn("Failed to close temporary Plasmo Voice encoder", e);
-            }
+            try { encoder.close(); }
+            catch (Exception e) { LOGGER.warn("Failed to close temporary Plasmo Voice encoder", e); }
         }
     }
 
     @EventSubscribe
     public void onAudioCaptureProcessed(AudioCaptureProcessedEvent event) {
         RecordingSession session = recordingSession;
-        if (session == null || !session.isActive()) {
-            return;
-        }
-
+        if (session == null || !session.isActive()) return;
         short[] samples = event.getProcessed().getMono();
-        if (samples != null && samples.length > 0) {
-            session.appendPcm(samples, 0, samples.length);
-        }
+        if (samples != null && samples.length > 0) session.appendPcm(samples, 0, samples.length);
     }
 }
