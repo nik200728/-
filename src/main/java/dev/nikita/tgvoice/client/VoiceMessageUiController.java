@@ -8,7 +8,7 @@ import net.minecraft.client.Minecraft;
 import net.minecraft.resources.Identifier;
 import org.lwjgl.glfw.GLFW;
 
-/** Opens the voice-message player without replacing or modifying Plasmo Voice screens. */
+/** Opens the standalone voice-message inbox without replacing or modifying Plasmo Voice screens. */
 public final class VoiceMessageUiController {
     private static final KeyMapping OPEN_KEY = KeyMappingHelper.registerKeyMapping(new KeyMapping(
             "key.tgvoice.open_messages",
@@ -25,13 +25,12 @@ public final class VoiceMessageUiController {
         if (registered) return;
         registered = true;
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            while (OPEN_KEY.consumeClick()) openLatest(client);
+            while (OPEN_KEY.consumeClick()) openMessages(client);
         });
     }
 
-    private static void openLatest(Minecraft client) {
-        String messageId = VoiceMessagePlaybackManager.lastReceivedMessageId();
-        if (messageId == null || VoiceMessagePlaybackManager.get(messageId) == null) return;
-        client.setScreen(new VoiceMessageScreen(messageId));
+    private static void openMessages(Minecraft client) {
+        if (VoiceMessagePlaybackManager.messageIds().isEmpty()) return;
+        client.setScreen(new VoiceMessageScreen());
     }
 }
