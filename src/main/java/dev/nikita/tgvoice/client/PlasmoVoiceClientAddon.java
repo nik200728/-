@@ -110,8 +110,14 @@ public final class PlasmoVoiceClientAddon implements AddonInitializer {
                 packets.add(encoder.encode(frame));
             }
             return OpusOggWriter.write(packets, totalSamples);
+        } catch (Exception e) {
+            throw new IllegalStateException("Failed to encode voice message with Plasmo Voice", e);
         } finally {
-            encoder.close();
+            try {
+                encoder.close();
+            } catch (Exception e) {
+                LOGGER.warn("Failed to close temporary Plasmo Voice encoder", e);
+            }
         }
     }
 
