@@ -137,8 +137,8 @@ async function probeDurationMs(input: string): Promise<number> {
 
 export async function sendTelegramVideoNote(telegram: (method: string, init?: RequestInit) => Promise<any>, chatId: string, video: Buffer, durationMs: number, length: number, messageId: string) {
   if (video.length === 0 || video.length > MAX_VIDEO_BYTES) throw new Error("video_too_large");
-  if (durationMs < 1 || durationMs > MAX_VIDEO_DURATION_MS) throw new Error("invalid_duration");
-  if (length < 1 || length > MAX_VIDEO_DIMENSION) throw new Error("invalid_length");
+  if (!Number.isInteger(durationMs) || durationMs < 1 || durationMs > MAX_VIDEO_DURATION_MS) throw new Error("invalid_duration");
+  if (!Number.isInteger(length) || length < 1 || length > MAX_VIDEO_DIMENSION) throw new Error("invalid_length");
   const mp4 = await tgv1ToMp4(video); const form = new FormData(); form.set("chat_id", chatId); form.set("duration", String(Math.ceil(durationMs / 1000))); form.set("length", String(length)); form.set("caption", `Minecraft video note • ${messageId}`); form.set("video_note", new Blob([mp4.buffer.slice(mp4.byteOffset, mp4.byteOffset + mp4.byteLength) as ArrayBuffer], { type: "video/mp4" }), `${messageId}.mp4`);
   const result = await telegram("sendVideoNote", { method: "POST", body: form }); return result?.message_id ?? null;
 }
