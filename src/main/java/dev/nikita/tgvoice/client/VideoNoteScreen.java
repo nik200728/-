@@ -65,10 +65,9 @@ public final class VideoNoteScreen extends Screen {
         int imageTop = cy - VIDEO_RADIUS;
         Identifier texture = textureManager.upload(state.frame());
 
-        // The source is currently drawn square; the circular frame and progress
-        // ring remain visually isolated from the texture upload path.
         graphics.fill(imageLeft - 5, imageTop - 5, imageLeft + VIDEO_SIZE + 5, imageTop + VIDEO_SIZE + 5, 0xFF303A49);
-        graphics.blit(texture, imageLeft, imageTop, VIDEO_SIZE, VIDEO_SIZE, 0.0f, 0.0f, state.width(), state.height());
+        graphics.blit(texture, imageLeft, imageTop, VIDEO_SIZE, VIDEO_SIZE,
+                0, 0, state.width(), state.height(), state.width(), state.height());
         drawProgressRing(graphics, cx, cy, VIDEO_RADIUS + 7, state.progress());
 
         graphics.drawCenteredString(font, Component.literal(state.senderName()), cx, top + 248, 0xFFFFFFFF);
