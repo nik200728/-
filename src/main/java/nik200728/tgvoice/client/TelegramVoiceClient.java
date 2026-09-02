@@ -3,7 +3,6 @@ package nik200728.tgvoice.client;
 import dev.nikita.tgvoice.client.PlasmoVoiceClientAddon;
 import dev.nikita.tgvoice.client.VoiceMessageInput;
 import dev.nikita.tgvoice.client.VoiceMessagePlaybackManager;
-import dev.nikita.tgvoice.client.VoiceMessageUiController;
 import net.fabricmc.api.ClientModInitializer;
 import su.plo.voice.api.client.PlasmoVoiceClient;
 
@@ -18,6 +17,6 @@ public final class TelegramVoiceClient implements ClientModInitializer {
         PlasmoVoiceClient.getAddonsLoader().load(new PlasmoVoiceClientAddon());
         VoiceMessageInput.register();
         VoiceMessagePlaybackManager.register();
-        VoiceMessageUiController.register();
+        dev.nikita.tgvoice.client.VoiceMessageUiController.register();
     }
 }
