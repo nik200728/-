@@ -315,9 +315,25 @@ const server = http.createServer(async (req, res) => {
       const uuid = new URL(req.url, `http://${req.headers.host ?? "localhost"}`).searchParams.get("minecraftUuid");
       if (!uuid) return json(res, 400, { error: "minecraftUuid required" });
       const messages = inbox.get(uuid) ?? [];
-      inbox.delete(uuid);
-      schedulePersist();
       return json(res, 200, { messages });
+    }
+
+    if (req.method === "POST" && req.url === "/v1/inbox/ack") {
+      const body = await readBody(req);
+      if (typeof body.minecraftUuid !== "string" || typeof body.messageId !== "string") {
+        return json(res, 400, { error: "minecraftUuid and messageId required" });
+      }
+      const binding = bindings.get(body.minecraftUuid);
+      if (!binding) return json(res, 409, { error: "minecraft_not_linked" });
+      const queue = inbox.get(body.minecraftUuid) ?? [];
+      const next = queue.filter(message => message.messageId !== body.messageId);
+      const removed = next.length !== queue.length;
+      if (removed) {
+        if (next.length === 0) inbox.delete(body.minecraftUuid);
+        else inbox.set(body.minecraftUuid, next);
+        schedulePersist();
+      }
+      return json(res, 200, { acknowledged: removed, messageId: body.messageId });
     }
 
     if (req.method === "GET" && req.url?.startsWith("/v1/link/status?")) {
