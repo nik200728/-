@@ -40,7 +40,7 @@ public final class BridgeHttpClient {
     public CompletableFuture<Void> send(VoiceMessagePayload payload) {
         if (!isConfigured()) return CompletableFuture.failedFuture(new IllegalStateException("Bridge token is not configured"));
         String json = "{\"messageId\":\"" + escape(payload.messageId()) + "\",\"minecraftUuid\":\"" + payload.senderUuid() + "\",\"durationMs\":" + payload.durationMillis() + ",\"audioBase64\":\"" + Base64.getEncoder().encodeToString(payload.opusData()) + "\"}";
-        return client.sendAsync(authorizedPost(endpoint, json, Duration.ofSeconds(30)), HttpResponse.BodyHandlers.discarding()).thenCompose(this::require2xx("Bridge returned HTTP "));
+        return client.sendAsync(authorizedPost(endpoint, json, Duration.ofSeconds(30)), HttpResponse.BodyHandlers.discarding()).thenApply(response -> require2xxValue(response, "Bridge returned HTTP "));
     }
 
     public CompletableFuture<LinkCode> createLinkCode(UUID minecraftUuid) {
@@ -75,7 +75,7 @@ public final class BridgeHttpClient {
         if (!isConfigured()) return CompletableFuture.failedFuture(new IllegalStateException("Bridge token is not configured"));
         if (text == null || text.isBlank() || text.length() > 4096) return CompletableFuture.failedFuture(new IllegalArgumentException("chat text must contain 1-4096 characters"));
         String json = "{\"minecraftUuid\":\"" + minecraftUuid + "\",\"text\":\"" + escape(text) + "\"}";
-        return client.sendAsync(authorizedPost(chatEndpoint, json, Duration.ofSeconds(15)), HttpResponse.BodyHandlers.discarding()).thenCompose(this::require2xx("Bridge chat returned HTTP "));
+        return client.sendAsync(authorizedPost(chatEndpoint, json, Duration.ofSeconds(15)), HttpResponse.BodyHandlers.discarding()).thenApply(response -> require2xxValue(response, "Bridge chat returned HTTP "));
     }
 
     public CompletableFuture<List<InboundVoiceMessage>> pollInbox(UUID minecraftUuid) {
@@ -93,13 +93,14 @@ public final class BridgeHttpClient {
 
     public CompletableFuture<Void> acknowledgeInbox(UUID minecraftUuid, String messageId) {
         if (!isConfigured()) return CompletableFuture.failedFuture(new IllegalStateException("Bridge token is not configured"));
-        return client.sendAsync(authorizedPost(inboxAckEndpoint, "{\"minecraftUuid\":\"" + minecraftUuid + "\",\"messageId\":\"" + escape(messageId) + "\"}", Duration.ofSeconds(10)), HttpResponse.BodyHandlers.discarding()).thenCompose(this::require2xx("Bridge inbox ack returned HTTP "));
+        return client.sendAsync(authorizedPost(inboxAckEndpoint, "{\"minecraftUuid\":\"" + minecraftUuid + "\",\"messageId\":\"" + escape(messageId) + "\"}", Duration.ofSeconds(10)), HttpResponse.BodyHandlers.discarding()).thenApply(response -> require2xxValue(response, "Bridge inbox ack returned HTTP "));
     }
 
-    private CompletableFuture<Void> require2xx(HttpResponse<?> response, String prefix) {
-        if (response.statusCode() >= 200 && response.statusCode() < 300) return CompletableFuture.completedFuture(null);
-        return CompletableFuture.failedFuture(new IllegalStateException(prefix + response.statusCode()));
+    private static Void require2xxValue(HttpResponse<?> response, String prefix) {
+        if (response.statusCode() < 200 || response.statusCode() >= 300) throw new IllegalStateException(prefix + response.statusCode());
+        return null;
     }
+
     private HttpRequest authorizedPost(URI uri, String json, Duration timeout) { return HttpRequest.newBuilder(uri).timeout(timeout).header("Authorization", "Bearer " + token).header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(json)).build(); }
 
     public record LinkCode(String code, long expiresAt) {}
