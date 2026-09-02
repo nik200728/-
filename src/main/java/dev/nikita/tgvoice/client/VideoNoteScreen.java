@@ -64,7 +64,8 @@ public final class VideoNoteScreen extends Screen {
         int cy = top + 148;
         int imageLeft = cx - VIDEO_RADIUS;
         int imageTop = cy - VIDEO_RADIUS;
-        Identifier texture = textureManager.upload(state.frame());
+        // Decode/upload from the frame bytes so GPU ownership is independent from the CPU cache.
+        Identifier texture = textureManager.upload(playback.currentFrame().encodedImage(), state.width(), state.height());
 
         // Circular-looking presentation: dark backing disc + real frame + segmented ring.
         graphics.fill(imageLeft - 6, imageTop - 6, imageLeft + VIDEO_SIZE + 6, imageTop + VIDEO_SIZE + 6, 0xFF303A49);
@@ -89,11 +90,8 @@ public final class VideoNoteScreen extends Screen {
         graphics.fill(barLeft, barY, barRight, barY + 4, 0xFF384454);
         graphics.fill(barLeft, barY, barLeft + Math.round((barRight - barLeft) * state.progress()), barY + 4, 0xFF4EA1FF);
 
-        // Navigation controls.
-        drawControl(graphics, left + 68, top + 330, "‹", selectedIndex > 0,
-                mouseX, mouseY);
-        drawControl(graphics, left + PANEL_WIDTH - 68, top + 330, "›", selectedIndex < messages.size() - 1,
-                mouseX, mouseY);
+        drawControl(graphics, left + 68, top + 330, "‹", selectedIndex > 0, mouseX, mouseY);
+        drawControl(graphics, left + PANEL_WIDTH - 68, top + 330, "›", selectedIndex < messages.size() - 1, mouseX, mouseY);
 
         String action = state.playing() ? "Pause" : (state.positionMillis() >= state.durationMillis() ? "Replay" : "Play");
         graphics.drawCenteredString(font, Component.literal(action), cx, top + 323, 0xFFFFFFFF);
