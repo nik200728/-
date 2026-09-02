@@ -1,32 +1,34 @@
 package dev.nikita.tgvoice.client;
 
+import com.mojang.blaze3d.platform.NativeImage;
 import dev.nikita.tgvoice.network.VideoNoteContainer;
 
-import javax.imageio.ImageIO;
-import java.awt.image.BufferedImage;
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-/** Small bounded cache of decoded video-note frames. */
-public final class VideoNoteFrameCache {
+/** Small bounded cache of decoded native Minecraft images. */
+public final class VideoNoteFrameCache implements AutoCloseable {
     private static final int MAX_ENTRIES = 96;
-    private final Map<FrameKey, BufferedImage> cache = new LinkedHashMap<>(16, 0.75f, true) {
+    private final Map<FrameKey, NativeImage> cache = new LinkedHashMap<>(16, 0.75f, true) {
         @Override
-        protected boolean removeEldestEntry(Map.Entry<FrameKey, BufferedImage> eldest) {
-            return size() > MAX_ENTRIES;
+        protected boolean removeEldestEntry(Map.Entry<FrameKey, NativeImage> eldest) {
+            if (size() <= MAX_ENTRIES) return false;
+            eldest.getValue().close();
+            return true;
         }
     };
 
-    public synchronized BufferedImage get(VideoNoteContainer.Frame frame, int expectedWidth, int expectedHeight) {
+    public synchronized NativeImage get(VideoNoteContainer.Frame frame, int expectedWidth, int expectedHeight) {
         if (frame == null) return null;
         FrameKey key = new FrameKey(frame.timestampMillis(), java.util.Arrays.hashCode(frame.encodedImage()));
-        BufferedImage cached = cache.get(key);
+        NativeImage cached = cache.get(key);
         if (cached != null) return cached;
         try {
-            BufferedImage image = ImageIO.read(new ByteArrayInputStream(frame.encodedImage()));
-            if (image == null || image.getWidth() != expectedWidth || image.getHeight() != expectedHeight) {
+            NativeImage image = NativeImage.read(new ByteArrayInputStream(frame.encodedImage()));
+            if (image.getWidth() != expectedWidth || image.getHeight() != expectedHeight) {
+                image.close();
                 throw new IllegalArgumentException("video frame dimensions do not match container");
             }
             cache.put(key, image);
@@ -36,7 +38,13 @@ public final class VideoNoteFrameCache {
         }
     }
 
-    public synchronized void clear() { cache.clear(); }
+    public synchronized void clear() {
+        for (NativeImage image : cache.values()) image.close();
+        cache.clear();
+    }
+
+    @Override
+    public void close() { clear(); }
 
     private record FrameKey(long timestampMillis, int contentHash) {}
 }
