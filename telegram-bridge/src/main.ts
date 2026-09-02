@@ -1,10 +1,13 @@
 import crypto from "node:crypto";
+import fs from "node:fs";
 import http from "node:http";
+import path from "node:path";
 
 const PORT = Number(process.env.PORT ?? 8080);
 const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN ?? "";
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? "";
 const TELEGRAM_POLL_MS = Number(process.env.TELEGRAM_POLL_MS ?? 1500);
+const DATA_FILE = process.env.BRIDGE_DATA_FILE ?? path.resolve(process.cwd(), "data", "state.json");
 
 if (BRIDGE_TOKEN.length < 32) throw new Error("BRIDGE_TOKEN must contain at least 32 characters");
 if (!TELEGRAM_BOT_TOKEN) console.warn("TELEGRAM_BOT_TOKEN is not configured; Telegram polling is disabled");
@@ -20,12 +23,66 @@ type InboxMessage = {
   audioBase64: string;
   createdAt: number;
 };
+type PersistedState = {
+  links: LinkCode[];
+  bindings: Binding[];
+  inbox: InboxMessage[];
+  telegramOffset: number;
+};
 
 const links = new Map<string, LinkCode>();
 const bindings = new Map<string, Binding>();
 const inbox = new Map<string, InboxMessage[]>();
 let telegramOffset = 0;
 let telegramPolling = false;
+let stateWriteScheduled = false;
+
+function loadState() {
+  try {
+    const state = JSON.parse(fs.readFileSync(DATA_FILE, "utf8")) as Partial<PersistedState>;
+    for (const link of state.links ?? []) {
+      if (typeof link.code === "string" && typeof link.minecraftUuid === "string" && link.expiresAt > Date.now()) links.set(link.code, link);
+    }
+    for (const binding of state.bindings ?? []) {
+      if (binding.minecraftUuid && binding.telegramUserId && binding.chatId) bindings.set(binding.minecraftUuid, binding);
+    }
+    for (const message of state.inbox ?? []) {
+      if (!message.minecraftUuid || !message.messageId || !message.audioBase64) continue;
+      const queue = inbox.get(message.minecraftUuid) ?? [];
+      queue.push(message);
+      if (queue.length <= 100) inbox.set(message.minecraftUuid, queue);
+    }
+    telegramOffset = Math.max(0, Number(state.telegramOffset ?? 0));
+    console.log(`Loaded bridge state: ${bindings.size} link(s), ${[...inbox.values()].reduce((n, q) => n + q.length, 0)} queued message(s)`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.warn("Could not load bridge state:", error);
+  }
+}
+
+function snapshotState(): PersistedState {
+  return {
+    links: [...links.values()],
+    bindings: [...bindings.values()],
+    inbox: [...inbox.values()].flat(),
+    telegramOffset,
+  };
+}
+
+function persistState() {
+  fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
+  const temp = `${DATA_FILE}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify(snapshotState()), { encoding: "utf8", mode: 0o600 });
+  fs.renameSync(temp, DATA_FILE);
+}
+
+function schedulePersist() {
+  if (stateWriteScheduled) return;
+  stateWriteScheduled = true;
+  setImmediate(() => {
+    stateWriteScheduled = false;
+    try { persistState(); } catch (error) { console.error("Could not persist bridge state:", error); }
+  });
+}
 
 function authorized(req: http.IncomingMessage): boolean {
   const value = req.headers.authorization ?? "";
@@ -61,10 +118,15 @@ function readBody(req: http.IncomingMessage): Promise<any> {
 }
 
 function createLinkCode(minecraftUuid: string): LinkCode {
-  const code = String(crypto.randomInt(100000, 1000000));
-  const link = { minecraftUuid, code, expiresAt: Date.now() + 5 * 60_000 };
-  links.set(code, link);
-  return link;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const code = String(crypto.randomInt(100000, 1000000));
+    if (links.has(code)) continue;
+    const link = { minecraftUuid, code, expiresAt: Date.now() + 5 * 60_000 };
+    links.set(code, link);
+    schedulePersist();
+    return link;
+  }
+  throw new Error("could_not_create_link_code");
 }
 
 async function telegram(method: string, init?: RequestInit) {
@@ -100,6 +162,7 @@ function enqueue(message: InboxMessage) {
   queue.push(message);
   while (queue.length > 100) queue.shift();
   inbox.set(message.minecraftUuid, queue);
+  schedulePersist();
 }
 
 async function handleTelegramVoice(message: any) {
@@ -155,6 +218,7 @@ async function pollTelegram() {
     });
     for (const update of updates as any[]) {
       telegramOffset = Math.max(telegramOffset, Number(update.update_id) + 1);
+      schedulePersist();
       const message = update.message;
       if (!message) continue;
       const chatId = String(message.chat?.id ?? "");
@@ -168,8 +232,26 @@ async function pollTelegram() {
         } else {
           links.delete(link.code);
           bindings.set(link.minecraftUuid, { minecraftUuid: link.minecraftUuid, telegramUserId: fromId, chatId });
+          schedulePersist();
           await sendTelegramText(chatId, "Готово. Minecraft и Telegram связаны.");
         }
+        continue;
+      }
+      if (/^\/unlink(?:@[^ ]+)?$/i.test(text)) {
+        const binding = [...bindings.values()].find(item => item.chatId === chatId && item.telegramUserId === fromId);
+        if (binding) {
+          bindings.delete(binding.minecraftUuid);
+          inbox.delete(binding.minecraftUuid);
+          schedulePersist();
+          await sendTelegramText(chatId, "Связь с Minecraft удалена.");
+        } else {
+          await sendTelegramText(chatId, "Активной связи не найдено.");
+        }
+        continue;
+      }
+      if (/^\/status(?:@[^ ]+)?$/i.test(text)) {
+        const binding = [...bindings.values()].find(item => item.chatId === chatId && item.telegramUserId === fromId);
+        await sendTelegramText(chatId, binding ? "Minecraft и Telegram связаны." : "Minecraft и Telegram не связаны.");
         continue;
       }
       if (message.voice) await handleTelegramVoice(message);
@@ -180,6 +262,8 @@ async function pollTelegram() {
     telegramPolling = false;
   }
 }
+
+loadState();
 
 const server = http.createServer(async (req, res) => {
   try {
@@ -200,7 +284,17 @@ const server = http.createServer(async (req, res) => {
       if (typeof body.telegramUserId !== "string" || typeof body.chatId !== "string") return json(res, 400, { error: "telegramUserId and chatId required" });
       links.delete(link.code);
       bindings.set(link.minecraftUuid, { minecraftUuid: link.minecraftUuid, telegramUserId: body.telegramUserId, chatId: body.chatId });
+      schedulePersist();
       return json(res, 200, { minecraftUuid: link.minecraftUuid, linked: true });
+    }
+
+    if (req.method === "POST" && req.url === "/v1/link/unlink") {
+      const body = await readBody(req);
+      if (typeof body.minecraftUuid !== "string") return json(res, 400, { error: "minecraftUuid required" });
+      const removed = bindings.delete(body.minecraftUuid);
+      if (removed) inbox.delete(body.minecraftUuid);
+      schedulePersist();
+      return json(res, 200, { minecraftUuid: body.minecraftUuid, unlinked: removed });
     }
 
     if (req.method === "POST" && req.url === "/v1/messages") {
@@ -222,6 +316,7 @@ const server = http.createServer(async (req, res) => {
       if (!uuid) return json(res, 400, { error: "minecraftUuid required" });
       const messages = inbox.get(uuid) ?? [];
       inbox.delete(uuid);
+      schedulePersist();
       return json(res, 200, { messages });
     }
 
