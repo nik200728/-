@@ -2,6 +2,7 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 import http from "node:http";
 import path from "node:path";
+import { sendTelegramVideoNote, validateVideoInput } from "./video.ts";
 
 const PORT = Number(process.env.PORT ?? 8080);
 const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN ?? "";
@@ -148,6 +149,10 @@ async function pollTelegram() {
         continue;
       }
       if (message.voice) await handleTelegramVoice(message);
+      if (message.video_note) {
+        const binding = [...bindings.values()].find(item => item.chatId === chatId && item.telegramUserId === fromId);
+        if (binding) await sendTelegramText(chatId, "Видео-сообщение получено, но конвертация Telegram MP4 в Minecraft-формат пока не подключена.");
+      }
     }
   } catch (error) { console.error("Telegram polling:", error instanceof Error ? error.message : error); }
   finally { telegramPolling = false; }
@@ -181,6 +186,15 @@ const server = http.createServer(async (req, res) => {
       const binding = bindings.get(body.minecraftUuid); if (!binding) return json(res, 409, { error: "minecraft_not_linked" });
       const audio = Buffer.from(body.audioBase64, "base64"); if (audio.length === 0 || audio.length > 2 * 1024 * 1024) return json(res, 413, { error: "audio_too_large" });
       const durationMs = Number(body.durationMs); const telegramMessageId = await sendTelegramVoice(binding.chatId, audio, durationMs, body.messageId);
+      return json(res, 200, { accepted: true, messageId: body.messageId, telegramMessageId });
+    }
+    if (req.method === "POST" && req.url === "/v1/video-notes") {
+      const body = await readBody(req);
+      if (typeof body.messageId !== "string" || typeof body.minecraftUuid !== "string") return json(res, 400, { error: "messageId and minecraftUuid required" });
+      const binding = bindings.get(body.minecraftUuid); if (!binding) return json(res, 409, { error: "minecraft_not_linked" });
+      const input = validateVideoInput(body);
+      if (input.width !== input.height) return json(res, 400, { error: "video_note_must_be_square" });
+      const telegramMessageId = await sendTelegramVideoNote(telegram, binding.chatId, input.video, input.durationMs, input.width, body.messageId);
       return json(res, 200, { accepted: true, messageId: body.messageId, telegramMessageId });
     }
     if (req.method === "POST" && req.url === "/v1/chat") {
