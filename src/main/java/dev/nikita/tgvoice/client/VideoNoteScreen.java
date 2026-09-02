@@ -2,8 +2,11 @@ package dev.nikita.tgvoice.client;
 
 import dev.nikita.tgvoice.network.VideoNotePayload;
 import net.minecraft.client.Minecraft;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.KeyEvent;
+import net.minecraft.client.input.MouseButtonEvent;
+import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.Identifier;
 
@@ -31,20 +34,19 @@ public final class VideoNoteScreen extends Screen {
     }
 
     @Override
-    public void render(GuiGraphics graphics, int mouseX, int mouseY, float delta) {
-        renderBackground(graphics, mouseX, mouseY, delta);
+    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
+        super.extractRenderState(graphics, mouseX, mouseY, delta);
         List<VideoNotePayload> messages = VideoNoteManager.getInstance().messages();
         int left = (width - PANEL_WIDTH) / 2;
         int top = (height - PANEL_HEIGHT) / 2;
 
         graphics.fill(left, top, left + PANEL_WIDTH, top + PANEL_HEIGHT, 0xE9141821);
         graphics.fill(left, top, left + PANEL_WIDTH, top + 3, 0xFF4EA1FF);
-        graphics.drawString(font, Component.literal("Video notes"), left + 20, top + 18, 0xFFFFFFFF);
-        graphics.drawString(font, Component.literal("ESC"), left + PANEL_WIDTH - 45, top + 18, 0xFF7F8DA0);
+        graphics.text(font, Component.literal("Video notes"), left + 20, top + 18, 0xFFFFFFFF, false);
+        graphics.text(font, Component.literal("ESC"), left + PANEL_WIDTH - 45, top + 18, 0xFF7F8DA0, false);
 
         if (messages.isEmpty()) {
-            graphics.drawCenteredString(font, Component.literal("No video notes"), width / 2, top + 180, 0xFFB9C2CF);
-            super.render(graphics, mouseX, mouseY, delta);
+            graphics.centeredText(font, Component.literal("No video notes"), width / 2, top + 180, 0xFFB9C2CF);
             return;
         }
 
@@ -55,8 +57,7 @@ public final class VideoNoteScreen extends Screen {
         try {
             state = VideoNoteRenderState.from(payload, playback, frameCache);
         } catch (RuntimeException error) {
-            graphics.drawCenteredString(font, Component.literal("Invalid video note"), width / 2, top + 180, 0xFFFF8A8A);
-            super.render(graphics, mouseX, mouseY, delta);
+            graphics.centeredText(font, Component.literal("Invalid video note"), width / 2, top + 180, 0xFFFF8A8A);
             return;
         }
 
@@ -64,13 +65,11 @@ public final class VideoNoteScreen extends Screen {
         int cy = top + 148;
         int imageLeft = cx - VIDEO_RADIUS;
         int imageTop = cy - VIDEO_RADIUS;
-        // Decode/upload from the frame bytes so GPU ownership is independent from the CPU cache.
         Identifier texture = textureManager.upload(playback.currentFrame().encodedImage(), state.width(), state.height());
 
-        // Circular-looking presentation: dark backing disc + real frame + segmented ring.
         graphics.fill(imageLeft - 6, imageTop - 6, imageLeft + VIDEO_SIZE + 6, imageTop + VIDEO_SIZE + 6, 0xFF303A49);
-        graphics.blit(texture, imageLeft, imageTop, VIDEO_SIZE, VIDEO_SIZE,
-                0, 0, state.width(), state.height(), state.width(), state.height());
+        graphics.blit(RenderPipelines.GUI_TEXTURED, texture, imageLeft, imageTop,
+                0, 0, VIDEO_SIZE, VIDEO_SIZE, state.width(), state.height());
         drawProgressRing(graphics, cx, cy, VIDEO_RADIUS + 7, state.progress());
 
         boolean videoHovered = Math.hypot(mouseX - cx, mouseY - cy) <= VIDEO_RADIUS;
@@ -79,8 +78,8 @@ public final class VideoNoteScreen extends Screen {
             drawPlaybackGlyph(graphics, cx, cy, state.playing());
         }
 
-        graphics.drawCenteredString(font, Component.literal(state.senderName()), cx, top + 248, 0xFFFFFFFF);
-        graphics.drawCenteredString(font,
+        graphics.centeredText(font, Component.literal(state.senderName()), cx, top + 248, 0xFFFFFFFF);
+        graphics.centeredText(font,
                 Component.literal(formatTime(state.positionMillis()) + " / " + formatTime(state.durationMillis())),
                 cx, top + 267, 0xFFB9C2CF);
 
@@ -94,15 +93,13 @@ public final class VideoNoteScreen extends Screen {
         drawControl(graphics, left + PANEL_WIDTH - 68, top + 330, "›", selectedIndex < messages.size() - 1, mouseX, mouseY);
 
         String action = state.playing() ? "Pause" : (state.positionMillis() >= state.durationMillis() ? "Replay" : "Play");
-        graphics.drawCenteredString(font, Component.literal(action), cx, top + 323, 0xFFFFFFFF);
-        graphics.drawCenteredString(font,
+        graphics.centeredText(font, Component.literal(action), cx, top + 323, 0xFFFFFFFF);
+        graphics.centeredText(font,
                 Component.literal((selectedIndex + 1) + " / " + messages.size()),
                 cx, top + 349, 0xFF7F8DA0);
-
-        super.render(graphics, mouseX, mouseY, delta);
     }
 
-    private void drawPlaybackGlyph(GuiGraphics graphics, int cx, int cy, boolean playing) {
+    private void drawPlaybackGlyph(GuiGraphicsExtractor graphics, int cx, int cy, boolean playing) {
         if (playing) {
             graphics.fill(cx - 10, cy - 12, cx - 3, cy + 12, 0xFFFFFFFF);
             graphics.fill(cx + 3, cy - 12, cx + 10, cy + 12, 0xFFFFFFFF);
@@ -113,14 +110,14 @@ public final class VideoNoteScreen extends Screen {
         graphics.fill(cx + 4, cy - 5, cx + 9, cy + 5, 0xFFFFFFFF);
     }
 
-    private void drawControl(GuiGraphics graphics, int cx, int cy, String glyph, boolean enabled, int mouseX, int mouseY) {
+    private void drawControl(GuiGraphicsExtractor graphics, int cx, int cy, String glyph, boolean enabled, int mouseX, int mouseY) {
         int alpha = enabled ? 0xFF : 0x55;
         boolean hovered = enabled && Math.hypot(mouseX - cx, mouseY - cy) <= 18;
         graphics.fill(cx - 18, cy - 15, cx + 18, cy + 15, hovered ? 0xFF344153 : 0xCC202936);
-        graphics.drawCenteredString(font, Component.literal(glyph), cx, cy - 8, (alpha << 24) | 0xFFFFFF);
+        graphics.centeredText(font, Component.literal(glyph), cx, cy - 8, (alpha << 24) | 0xFFFFFF);
     }
 
-    private void drawProgressRing(GuiGraphics graphics, int cx, int cy, int radius, float progress) {
+    private void drawProgressRing(GuiGraphicsExtractor graphics, int cx, int cy, int radius, float progress) {
         int segments = 72;
         int active = Math.round(segments * Math.max(0.0f, Math.min(1.0f, progress)));
         for (int i = 0; i < segments; i++) {
@@ -133,10 +130,13 @@ public final class VideoNoteScreen extends Screen {
     }
 
     @Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
+    public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
         List<VideoNotePayload> messages = VideoNoteManager.getInstance().messages();
-        if (messages.isEmpty()) return super.mouseClicked(mouseX, mouseY, button);
+        if (messages.isEmpty()) return super.mouseClicked(event, doubleClick);
 
+        double mouseX = event.x();
+        double mouseY = event.y();
+        int button = event.button();
         int left = (width - PANEL_WIDTH) / 2;
         int top = (height - PANEL_HEIGHT) / 2;
         int cx = width / 2;
@@ -171,22 +171,22 @@ public final class VideoNoteScreen extends Screen {
                 }
             }
         }
-        return super.mouseClicked(mouseX, mouseY, button);
+        return super.mouseClicked(event, doubleClick);
     }
 
     @Override
-    public boolean keyPressed(int keyCode, int scanCode, int modifiers) {
+    public boolean keyPressed(KeyEvent event) {
         List<VideoNotePayload> messages = VideoNoteManager.getInstance().messages();
-        if (messages.isEmpty()) return super.keyPressed(keyCode, scanCode, modifiers);
-        if (keyCode == 263) {
+        if (messages.isEmpty()) return super.keyPressed(event);
+        if (event.key() == 263) {
             selectedIndex = Math.max(0, selectedIndex - 1);
             return true;
         }
-        if (keyCode == 262) {
+        if (event.key() == 262) {
             selectedIndex = Math.min(messages.size() - 1, selectedIndex + 1);
             return true;
         }
-        return super.keyPressed(keyCode, scanCode, modifiers);
+        return super.keyPressed(event);
     }
 
     @Override
