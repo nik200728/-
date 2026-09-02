@@ -4,5 +4,6 @@
   "screen.tgvoice.voice_messages": "Voice messages",
   "screen.tgvoice.message_unavailable": "Voice message unavailable",
   "screen.tgvoice.play": "Play",
-  "screen.tgvoice.pause": "Pause"
+  "screen.tgvoice.pause": "Pause",
+  "screen.tgvoice.stop": "Stop"
 }
