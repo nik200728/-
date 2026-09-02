@@ -3,6 +3,7 @@ package nik200728.tgvoice.client;
 import dev.nikita.tgvoice.client.PlasmoVoiceClientAddon;
 import dev.nikita.tgvoice.client.VideoNoteManager;
 import dev.nikita.tgvoice.client.VideoNotePlaybackManager;
+import dev.nikita.tgvoice.client.VideoNoteUiController;
 import dev.nikita.tgvoice.client.VoiceMessageClient;
 import dev.nikita.tgvoice.client.VoiceMessageInput;
 import dev.nikita.tgvoice.client.VoiceMessagePlaybackManager;
