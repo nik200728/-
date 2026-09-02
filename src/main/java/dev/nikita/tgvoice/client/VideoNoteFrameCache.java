@@ -31,10 +31,35 @@ public final class VideoNoteFrameCache implements AutoCloseable {
                 image.close();
                 throw new IllegalArgumentException("video frame dimensions do not match container");
             }
+            applyCircularAlphaMask(image);
             cache.put(key, image);
             return image;
         } catch (IOException e) {
             throw new IllegalArgumentException("invalid encoded video frame", e);
+        }
+    }
+
+    /**
+     * Makes the decoded frame transparent outside a centered circle. The GUI
+     * can therefore use ordinary alpha blending instead of a second render pass.
+     */
+    private static void applyCircularAlphaMask(NativeImage image) {
+        int width = image.getWidth();
+        int height = image.getHeight();
+        float radius = Math.min(width, height) * 0.5f;
+        float centerX = (width - 1) * 0.5f;
+        float centerY = (height - 1) * 0.5f;
+        float radiusSquared = radius * radius;
+
+        for (int y = 0; y < height; y++) {
+            float dy = y - centerY;
+            for (int x = 0; x < width; x++) {
+                float dx = x - centerX;
+                if (dx * dx + dy * dy > radiusSquared) {
+                    int rgba = image.getPixelRGBA(x, y);
+                    image.setPixelRGBA(x, y, rgba & 0x00FFFFFF);
+                }
+            }
         }
     }
 
