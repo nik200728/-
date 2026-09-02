@@ -38,6 +38,8 @@ test("rejects invalid duration and frame rate", () => {
   assert.throws(() => validateVideoInput({ ...base, durationMs: MAX_VIDEO_DURATION_MS + 1 }), /invalid_duration/);
   assert.throws(() => validateVideoInput({ ...base, durationMs: 1000, frameRate: MAX_VIDEO_FPS + 1 }), /invalid_frame_rate/);
   assert.throws(() => validateVideoInput({ ...base, durationMs: 1000, frameRate: Number.NaN }), /invalid_frame_rate/);
+  assert.throws(() => validateVideoInput({ ...base, durationMs: Infinity }), /invalid_duration/);
+  assert.throws(() => validateVideoInput({ ...base, durationMs: 1000, frameRate: -Infinity }), /invalid_frame_rate/);
 });
 
 test("rejects dimensions above the video-note limit", () => {
@@ -48,6 +50,13 @@ test("rejects dimensions above the video-note limit", () => {
     height: 512,
     frameRate: 30,
   }), /invalid_width/);
+  assert.throws(() => validateVideoInput({
+    videoBase64: Buffer.from("frame").toString("base64"),
+    durationMs: 1000,
+    width: 512,
+    height: -Infinity,
+    frameRate: 30,
+  }), /invalid_height/);
 });
 
 test("rejects malformed TGV1 before invoking ffmpeg", async () => {
@@ -68,4 +77,20 @@ test("rejects truncated TGV1 frame metadata", async () => {
   data.writeBigInt64BE(500n, 23);
   data.writeInt32BE(10, 31);
   await assert.rejects(() => tgv1ToMp4(data), /invalid_frame_length/);
+});
+
+test("rejects trailing bytes in an otherwise valid TGV1 container", async () => {
+  const data = Buffer.alloc(23 + 12 + 1 + 1);
+  data.writeInt32BE(0x54475631, 0);
+  data.writeUInt8(1, 4);
+  data.writeUInt16BE(1, 5);
+  data.writeUInt16BE(1, 7);
+  data.writeInt32BE(1, 9);
+  data.writeBigInt64BE(1000n, 13);
+  data.writeUInt16BE(1, 21);
+  data.writeBigInt64BE(500n, 23);
+  data.writeInt32BE(1, 31);
+  data.writeUInt8(0xff, 35);
+  data.writeUInt8(0xee, 36);
+  await assert.rejects(() => tgv1ToMp4(data), /trailing_video_container_bytes/);
 });
