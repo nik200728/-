@@ -8,15 +8,14 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
-/**
- * Records bounded webcam JPEG frames into the TGV1 transport container.
- * Capture runs on a dedicated thread so the Minecraft render/tick thread is
- * never blocked by a camera driver.
- */
+/** Records bounded webcam JPEG frames into the TGV1 transport container. */
 public final class VideoNoteRecorder implements AutoCloseable {
     public static final int FRAME_RATE = 15;
     public static final long FRAME_INTERVAL_MILLIS = 1000L / FRAME_RATE;
     public static final long MAX_DURATION_MILLIS = VideoNotePayload.MAX_DURATION_MILLIS;
+    private static final int MAX_FRAME_BYTES = 512 * 1024;
+    private static final int MAX_FRAMES = 900;
+    private static final int MAX_VIDEO_BYTES = VideoNotePayload.MAX_VIDEO_BYTES;
 
     private final WebcamCaptureService camera;
     private final Object lock = new Object();
@@ -26,6 +25,7 @@ public final class VideoNoteRecorder implements AutoCloseable {
     private long startedAtNanos;
     private volatile boolean recording;
     private volatile boolean cancelled;
+    private volatile String failure;
 
     public VideoNoteRecorder(WebcamCaptureService camera) {
         this.camera = camera;
@@ -38,6 +38,7 @@ public final class VideoNoteRecorder implements AutoCloseable {
             frames.clear();
         }
         cancelled = false;
+        failure = null;
         recording = true;
         startedAtNanos = System.nanoTime();
         worker = new Thread(this::captureLoop, "tgvoice-video-capture");
@@ -49,24 +50,32 @@ public final class VideoNoteRecorder implements AutoCloseable {
         return recording;
     }
 
-    /** Stops recording and returns a validated network payload. */
+    public String failure() {
+        return failure;
+    }
+
     public VideoNotePayload stop(UUID senderUuid, String senderName) throws IOException {
         finish(false);
         List<VideoNoteContainer.Frame> snapshot;
         synchronized (lock) {
             snapshot = List.copyOf(frames);
         }
-        if (snapshot.isEmpty()) throw new IllegalStateException("No webcam frames captured");
+        if (snapshot.isEmpty()) {
+            String reason = failure;
+            throw new IllegalStateException(reason == null ? "No webcam frames captured" : reason);
+        }
 
         long duration = Math.max(1L, elapsedMillis());
         duration = Math.min(MAX_DURATION_MILLIS, duration);
-        // The container requires every frame timestamp to be strictly inside duration.
         long lastTimestamp = snapshot.get(snapshot.size() - 1).timestampMillis();
         if (lastTimestamp >= duration) duration = Math.min(MAX_DURATION_MILLIS, lastTimestamp + 1);
 
         int size = WebcamCaptureService.TARGET_SIZE;
         VideoNoteContainer.Video video = new VideoNoteContainer.Video(size, size, FRAME_RATE, duration, snapshot);
         byte[] data = VideoNoteContainer.encode(video);
+        if (data.length > MAX_VIDEO_BYTES) {
+            throw new IllegalStateException("Video note exceeds the 8 MiB transport limit");
+        }
         return new VideoNotePayload(UUID.randomUUID().toString(), senderUuid, senderName,
                 duration, size, size, FRAME_RATE, data);
     }
@@ -89,10 +98,10 @@ public final class VideoNoteRecorder implements AutoCloseable {
         try {
             while (recording && !cancelled) {
                 long elapsed = elapsedMillis();
-                if (elapsed >= MAX_DURATION_MILLIS) break;
+                if (elapsed >= MAX_DURATION_MILLIS || frameCount() >= MAX_FRAMES) break;
 
                 byte[] jpeg = camera.captureJpeg();
-                if (jpeg != null && jpeg.length > 0 && jpeg.length <= 512 * 1024) {
+                if (jpeg != null && jpeg.length > 0 && jpeg.length <= MAX_FRAME_BYTES) {
                     synchronized (lock) {
                         frames.add(new VideoNoteContainer.Frame(Math.max(1L, elapsed), jpeg));
                     }
@@ -111,11 +120,16 @@ public final class VideoNoteRecorder implements AutoCloseable {
                     nextFrameAt = System.nanoTime();
                 }
             }
-        } catch (Exception ignored) {
-            // stop() reports the lack of captured frames; the UI can surface a
-            // concise camera error without crashing the client.
+        } catch (Exception exception) {
+            failure = exception.getMessage() == null ? exception.getClass().getSimpleName() : exception.getMessage();
         } finally {
             recording = false;
+        }
+    }
+
+    private int frameCount() {
+        synchronized (lock) {
+            return frames.size();
         }
     }
 
