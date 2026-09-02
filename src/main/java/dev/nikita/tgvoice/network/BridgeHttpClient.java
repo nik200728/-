@@ -73,7 +73,12 @@ public final class BridgeHttpClient {
         public InboundVoiceMessage { if (messageId == null || messageId.isBlank() || messageId.length() > 128) throw new IllegalArgumentException("invalid inbound messageId"); if (telegramUserId == null || telegramUserId.isBlank()) throw new IllegalArgumentException("invalid telegramUserId"); if (durationMs < 1 || durationMs > VoiceMessagePayload.MAX_DURATION_MILLIS) throw new IllegalArgumentException("invalid inbound duration"); if (audio == null || audio.length == 0 || audio.length > VoiceMessagePayload.MAX_AUDIO_BYTES) throw new IllegalArgumentException("invalid inbound audio"); }
     }
     public record InboundVideoMessage(String messageId, String telegramUserId, long durationMs, byte[] video, int width, int height, int frameRate) implements InboundMessage {
-        public InboundVideoMessage { if (messageId == null || messageId.isBlank() || messageId.length() > 128) throw new IllegalArgumentException("invalid inbound messageId"); if (telegramUserId == null || telegramUserId.isBlank()) throw new IllegalArgumentException("invalid telegramUserId"); if (video == null || video.length == 0 || video.length > VideoNotePayload.MAX_VIDEO_BYTES) throw new IllegalArgumentException("invalid inbound video"); new VideoNotePayload(UUID.randomUUID(), UUID.randomUUID(), "Telegram", durationMs, width, height, frameRate, video); }
+        public InboundVideoMessage {
+            if (messageId == null || messageId.isBlank() || messageId.length() > 128) throw new IllegalArgumentException("invalid inbound messageId");
+            if (telegramUserId == null || telegramUserId.isBlank()) throw new IllegalArgumentException("invalid telegramUserId");
+            if (video == null || video.length == 0 || video.length > VideoNotePayload.MAX_VIDEO_BYTES) throw new IllegalArgumentException("invalid inbound video");
+            new VideoNotePayload(messageId, UUID.nameUUIDFromBytes(("tgvoice:telegram:" + telegramUserId).getBytes(java.nio.charset.StandardCharsets.UTF_8)), "Telegram", durationMs, width, height, frameRate, video);
+        }
     }
     private static String setting(String property, String env, String fallback) { String value = System.getProperty(property); if (value != null && !value.isBlank()) return value; value = System.getenv(env); return value == null ? fallback : value; }
     private static String escape(String value) { return value.replace("\\", "\\\\").replace("\"", "\\\""); }
