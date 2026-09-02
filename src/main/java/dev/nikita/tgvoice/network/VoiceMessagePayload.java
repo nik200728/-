@@ -33,6 +33,21 @@ public record VoiceMessagePayload(
             buf -> new UUID(buf.readLong(), buf.readLong())
     );
 
+    /**
+     * Decode bounded byte arrays directly from the network buffer. Validation in the
+     * record constructor happens too late to protect the decoder from allocating an
+     * attacker-controlled array, so the protocol limits are enforced here as well.
+     */
+    private static final StreamCodec<RegistryFriendlyByteBuf, byte[]> AUDIO_CODEC = StreamCodec.of(
+            (buf, value) -> buf.writeByteArray(value),
+            buf -> buf.readByteArray(MAX_AUDIO_BYTES)
+    );
+
+    private static final StreamCodec<RegistryFriendlyByteBuf, byte[]> WAVEFORM_CODEC = StreamCodec.of(
+            (buf, value) -> buf.writeByteArray(value),
+            buf -> buf.readByteArray(MAX_WAVEFORM_BYTES)
+    );
+
     public static final StreamCodec<RegistryFriendlyByteBuf, VoiceMessagePayload> CODEC = StreamCodec.composite(
             ByteBufCodecs.STRING_UTF8,
             VoiceMessagePayload::messageId,
@@ -42,9 +57,9 @@ public record VoiceMessagePayload(
             VoiceMessagePayload::senderName,
             ByteBufCodecs.VAR_LONG,
             VoiceMessagePayload::durationMillis,
-            ByteBufCodecs.BYTE_ARRAY,
+            AUDIO_CODEC,
             VoiceMessagePayload::opusData,
-            ByteBufCodecs.BYTE_ARRAY,
+            WAVEFORM_CODEC,
             VoiceMessagePayload::waveform,
             VoiceMessagePayload::new
     );
