@@ -25,6 +25,7 @@ public final class TelegramVoiceMod implements ModInitializer {
     private static BridgeHttpClient bridgeClient;
     private static ServerMessageRouter messageRouter;
     private static final Set<UUID> INBOX_POLLS_IN_FLIGHT = ConcurrentHashMap.newKeySet();
+    private static final Set<String> INBOX_DELIVERIES_IN_FLIGHT = ConcurrentHashMap.newKeySet();
     private static int inboxTickCounter;
 
     @Override
@@ -87,6 +88,9 @@ public final class TelegramVoiceMod implements ModInitializer {
                     if (target == null) return;
 
                     for (BridgeHttpClient.InboundVoiceMessage message : messages) {
+                        String deliveryKey = playerUuid + ":" + message.messageId();
+                        if (!INBOX_DELIVERIES_IN_FLIGHT.add(deliveryKey)) continue;
+
                         UUID telegramSender = UUID.nameUUIDFromBytes(
                                 ("tgvoice:telegram:" + message.telegramUserId()).getBytes(StandardCharsets.UTF_8));
                         try {
@@ -98,7 +102,18 @@ public final class TelegramVoiceMod implements ModInitializer {
                                     message.audio(),
                                     new byte[]{0}
                             ));
+                            bridgeClient.acknowledgeInbox(playerUuid, message.messageId())
+                                    .whenComplete((acknowledged, ackError) -> {
+                                        if (ackError != null) {
+                                            LOGGER.warn("Failed to acknowledge Telegram Voice Message {}: {}",
+                                                    message.messageId(), ackError.getMessage());
+                                            INBOX_DELIVERIES_IN_FLIGHT.remove(deliveryKey);
+                                            return;
+                                        }
+                                        INBOX_DELIVERIES_IN_FLIGHT.remove(deliveryKey);
+                                    });
                         } catch (RuntimeException exception) {
+                            INBOX_DELIVERIES_IN_FLIGHT.remove(deliveryKey);
                             LOGGER.warn("Failed to deliver Telegram Voice Message {} to {}: {}",
                                     message.messageId(), playerUuid, exception.getMessage());
                         }
