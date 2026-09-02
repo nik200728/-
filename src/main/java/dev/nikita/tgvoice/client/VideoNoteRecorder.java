@@ -21,6 +21,9 @@ public final class VideoNoteRecorder implements AutoCloseable {
     private final Object lock = new Object();
     private final List<VideoNoteContainer.Frame> frames = new ArrayList<>();
 
+    /** Exact encoded container size of the frames currently held in memory. */
+    private int encodedBytes = VideoNoteContainer.HEADER_BYTES;
+
     private Thread worker;
     private long startedAtNanos;
     private volatile boolean recording;
@@ -36,6 +39,7 @@ public final class VideoNoteRecorder implements AutoCloseable {
         camera.open();
         synchronized (lock) {
             frames.clear();
+            encodedBytes = VideoNoteContainer.HEADER_BYTES;
         }
         cancelled = false;
         failure = null;
@@ -84,6 +88,7 @@ public final class VideoNoteRecorder implements AutoCloseable {
         finish(true);
         synchronized (lock) {
             frames.clear();
+            encodedBytes = VideoNoteContainer.HEADER_BYTES;
         }
     }
 
@@ -103,7 +108,15 @@ public final class VideoNoteRecorder implements AutoCloseable {
                 byte[] jpeg = camera.captureJpeg();
                 if (jpeg != null && jpeg.length > 0 && jpeg.length <= MAX_FRAME_BYTES) {
                     synchronized (lock) {
-                        frames.add(new VideoNoteContainer.Frame(Math.max(1L, elapsed), jpeg));
+                        int frameCost = VideoNoteContainer.FRAME_OVERHEAD_BYTES + jpeg.length;
+                        if (encodedBytes + frameCost <= MAX_VIDEO_BYTES) {
+                            frames.add(new VideoNoteContainer.Frame(Math.max(1L, elapsed), jpeg));
+                            encodedBytes += frameCost;
+                        } else {
+                            failure = "Video size limit reached";
+                            recording = false;
+                            break;
+                        }
                     }
                 }
 
