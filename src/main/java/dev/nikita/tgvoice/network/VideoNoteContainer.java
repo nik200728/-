@@ -21,7 +21,8 @@ public final class VideoNoteContainer {
     private static final int VERSION = 1;
     private static final int MAX_FRAMES = 1_800;
     private static final int MAX_FRAME_BYTES = 512 * 1024;
-    private static final int HEADER_BYTES = 4 + 1 + 2 + 2 + 4 + 8 + 2;
+    public static final int HEADER_BYTES = 4 + 1 + 2 + 2 + 4 + 8 + 2;
+    public static final int FRAME_OVERHEAD_BYTES = Long.BYTES + Integer.BYTES;
 
     private VideoNoteContainer() {}
 
