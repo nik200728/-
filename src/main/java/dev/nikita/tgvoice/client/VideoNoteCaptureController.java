@@ -79,7 +79,15 @@ public final class VideoNoteCaptureController {
             if (current == null) return;
             VideoNotePayload payload = current.stop(client.player.getUUID(), client.player.getGameProfile().name());
             ClientPlayNetworking.send(payload);
-            client.player.displayClientMessage(Component.literal("Video note sent"), true);
+
+            String failure = current.failure();
+            if (failure == null || failure.isBlank()) {
+                client.player.displayClientMessage(Component.literal("Video note sent"), true);
+            } else {
+                client.player.displayClientMessage(
+                        Component.literal("Video note sent (capture stopped: " + failure + ")"), true
+                );
+            }
         } catch (Exception exception) {
             client.player.displayClientMessage(Component.literal("Video note failed: " + safeMessage(exception)), true);
         } finally {
