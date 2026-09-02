@@ -2,6 +2,7 @@ package nik200728.tgvoice;
 
 import dev.nikita.tgvoice.network.BridgeHttpClient;
 import dev.nikita.tgvoice.network.ServerMessageRouter;
+import dev.nikita.tgvoice.network.VideoNotePayload;
 import dev.nikita.tgvoice.network.VoiceMessagePayload;
 import dev.nikita.tgvoice.server.TelegramVoiceCommands;
 import net.fabricmc.api.ModInitializer;
@@ -33,6 +34,8 @@ public final class TelegramVoiceMod implements ModInitializer {
     public void onInitialize() {
         PayloadTypeRegistry.serverboundPlay().register(VoiceMessagePayload.TYPE, VoiceMessagePayload.CODEC);
         PayloadTypeRegistry.clientboundPlay().register(VoiceMessagePayload.TYPE, VoiceMessagePayload.CODEC);
+        PayloadTypeRegistry.serverboundPlay().register(VideoNotePayload.TYPE, VideoNotePayload.CODEC);
+        PayloadTypeRegistry.clientboundPlay().register(VideoNotePayload.TYPE, VideoNotePayload.CODEC);
 
         bridgeClient = new BridgeHttpClient();
         TelegramVoiceCommands.register(bridgeClient);
@@ -64,8 +67,34 @@ public final class TelegramVoiceMod implements ModInitializer {
             }
         });
 
+        ServerPlayNetworking.registerGlobalReceiver(VideoNotePayload.TYPE, (payload, context) -> {
+            if (payload.videoData().length > VideoNotePayload.MAX_VIDEO_BYTES
+                    || payload.durationMillis() > VideoNotePayload.MAX_DURATION_MILLIS
+                    || payload.width() > VideoNotePayload.MAX_DIMENSION
+                    || payload.height() > VideoNotePayload.MAX_DIMENSION
+                    || payload.frameRate() > VideoNotePayload.MAX_FRAME_RATE) {
+                LOGGER.warn("Rejected oversized Video Note from {}", context.player().getGameProfile().name());
+                return;
+            }
+
+            // Local Minecraft video notes are intentionally independent from Telegram
+            // linking. A later bridge adapter may forward this same message when linked.
+            for (ServerPlayer player : context.server().getPlayerList().getPlayers()) {
+                ServerPlayNetworking.send(player, new VideoNotePayload(
+                        payload.messageId(),
+                        context.player().getUUID(),
+                        context.player().getGameProfile().name(),
+                        payload.durationMillis(),
+                        payload.width(),
+                        payload.height(),
+                        payload.frameRate(),
+                        payload.videoData()
+                ));
+            }
+        });
+
         ServerTickEvents.END_SERVER_TICK.register(TelegramVoiceMod::pollTelegramInbox);
-        LOGGER.info("Telegram Voice Messages initialized; explicit messages are isolated from proximity voice.");
+        LOGGER.info("Telegram Voice Messages initialized; explicit media is isolated from proximity voice.");
     }
 
     private static void pollTelegramInbox(MinecraftServer server) {
