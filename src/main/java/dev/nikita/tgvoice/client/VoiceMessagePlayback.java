@@ -82,9 +82,7 @@ public final class VoiceMessagePlayback {
 
     public void resume() {
         synchronized (lock) {
-            if (state == State.PAUSED) {
-                startPlaybackLocked();
-            }
+            if (state == State.PAUSED) startPlaybackLocked();
         }
     }
 
@@ -123,8 +121,6 @@ public final class VoiceMessagePlayback {
                 state = State.STOPPED;
                 closeSourceLocked();
             } else if (state == State.PLAYING) {
-                // Recreate the source so samples queued before the seek cannot leak
-                // into the newly selected position.
                 closeSourceLocked();
                 startPlaybackLocked();
             }
@@ -205,11 +201,8 @@ public final class VoiceMessagePlayback {
             }
         } finally {
             if (decoder != null) {
-                try {
-                    decoder.close();
-                } catch (RuntimeException e) {
-                    LOGGER.debug("Failed to close Voice Message decoder", e);
-                }
+                try { decoder.close(); }
+                catch (RuntimeException e) { LOGGER.debug("Failed to close Voice Message decoder", e); }
             }
         }
     }
@@ -245,22 +238,32 @@ public final class VoiceMessagePlayback {
         int offset = frameSampleOffset;
         int writtenSamples = frame.length - offset;
         if (offset == 0) {
-            source.write(frame);
+            source.write(applyPlaybackVolume(frame));
         } else {
-            source.write(Arrays.copyOfRange(frame, offset, frame.length));
+            source.write(applyPlaybackVolume(Arrays.copyOfRange(frame, offset, frame.length)));
             frameSampleOffset = 0;
         }
 
         frameIndex++;
-        // positionMillis already represents the seek target when this is the first
-        // partial frame. Count only the samples actually written so seeking into a
-        // frame cannot jump ahead by the full frame duration.
         positionMillis = Math.min(durationMillis, positionMillis + writtenSamples * 1000L / SAMPLE_RATE);
         if (positionMillis >= durationMillis || frameIndex >= decodedFrames.size()) {
             state = State.STOPPED;
             positionMillis = durationMillis;
             drainDeadlineNanos = System.nanoTime() + SOURCE_DRAIN_GRACE_NANOS;
         }
+    }
+
+    private static short[] applyPlaybackVolume(short[] input) {
+        float gain = VoiceMessageConfig.get().playbackVolume();
+        if (gain == 1.0f) return input;
+        if (gain <= 0.0f) return new short[input.length];
+
+        short[] output = new short[input.length];
+        for (int i = 0; i < input.length; i++) {
+            int scaled = Math.round(input[i] * gain);
+            output[i] = (short) Math.max(Short.MIN_VALUE, Math.min(Short.MAX_VALUE, scaled));
+        }
+        return output;
     }
 
     /** Parses Ogg pages into complete Opus packets and removes OpusHead/OpusTags. */
