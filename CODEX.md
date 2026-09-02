@@ -21,7 +21,35 @@ Do not claim a feature is implemented merely because transport models, UI, or ma
 - Server-side video-note transport/broadcast exists.
 - Client-side receive, playback timeline, frame cache, texture upload and custom video-note UI exist.
 - **Real camera capture is NOT considered implemented until an actual webcam capture backend is present and tested on Minecraft 26.1.2.**
-- **Telegram video_note send/receive is NOT considered implemented until the bridge explicitly handles Bot API `sendVideoNote`, inbound `message.video_note`, `getFile`, download, validation and delivery to Minecraft.**
+- The bridge now has an outbound `/v1/video-notes` path and Telegram `sendVideoNote` integration, plus inbound `message.video_note` detection and download scaffolding. **This is NOT considered end-to-end Telegram video-note support yet:** downloaded Telegram MP4 still needs conversion into the Minecraft `TGV1` frame container and delivery into the Minecraft inbox/network path.
+
+## Single-player test matrix
+The mod has both common (`main`) and client entrypoints, so its common server-side code can run inside Minecraft's integrated single-player server when the mod is installed in the client instance. A single-player world is therefore useful for local smoke tests, but it cannot prove multi-player synchronization.
+
+### What can be tested in a single-player world
+- Mod loading and dependency resolution.
+- Plasmo Voice initialization/handshake in an integrated server setup, provided Plasmo Voice is installed and compatible.
+- Voice-message UI, keybinds, recording lifecycle and local playback.
+- Voice-message packet serialization/validation and integrated-server transport.
+- Local video-note receive/playback/rendering when a valid `VideoNotePayload` is produced by the implemented path.
+- Resource cleanup and client lifecycle.
+
+### What requires two Minecraft clients/players
+- Actual server broadcast to another player.
+- Sender/receiver synchronization between separate clients.
+- Simultaneous proximity voice and media messages between players.
+- Disconnect/reconnect behavior across two clients.
+
+### What requires the external Telegram bridge
+- Minecraft ↔ Telegram linking.
+- Sending Minecraft voice/video notes to Telegram.
+- Receiving Telegram voice/video notes in Minecraft.
+- Telegram-side authentication, polling and persistence behavior.
+
+### What still requires real hardware/software validation
+- Webcam capture on the target machine.
+- Telegram MP4 video-note decoding/conversion into `TGV1` frames.
+- Final Gradle/TypeScript builds and runtime compatibility checks.
 
 ## Architecture constraints
 - Do not replace or fork Plasmo Voice's proximity voice protocol.
@@ -45,7 +73,7 @@ Do not claim a feature is implemented merely because transport models, UI, or ma
 9. Review voice recording/playback end-to-end.
 10. Review Telegram voice send/receive end-to-end.
 11. Implement and test a real webcam capture backend if still missing.
-12. Implement and test Telegram video_note bridge support if still missing.
+12. Complete and test Telegram video_note MP4-to-TGV1 conversion and Minecraft delivery.
 13. Review video frame encoding/decoding, timing, cache and texture lifecycle.
 14. Test local video notes without Telegram linking.
 15. Test simultaneous Plasmo Voice proximity audio and media messages.
