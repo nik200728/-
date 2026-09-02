@@ -22,8 +22,8 @@ public final class TelegramVoiceClient implements ClientModInitializer {
         PlasmoVoiceClient.getAddonsLoader().load(new PlasmoVoiceClientAddon());
         VoiceMessageInput.register();
         VoiceMessagePlaybackManager.register();
-        dev.nikita.tgvoice.client.VoiceMessageUiController.register();
         VideoNoteUiController.register();
+        VideoNoteCaptureController.register();
 
         ClientPlayNetworking.registerGlobalReceiver(VideoNotePayload.TYPE, (payload, context) ->
                 context.client().execute(() -> VideoNoteManager.getInstance().accept(payload)));
