@@ -4,7 +4,9 @@ import dev.nikita.tgvoice.network.VoiceMessagePayload;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /** Owns received Voice Message playback instances without touching proximity voice. */
@@ -12,6 +14,15 @@ public final class VoiceMessagePlaybackManager {
     private static final int MAX_MESSAGES = 64;
     private static final Map<String, VoiceMessagePlayback> PLAYBACKS = new LinkedHashMap<>(16, 0.75f, true) {
         @Override protected boolean removeEldestEntry(Map.Entry<String, VoiceMessagePlayback> eldest) {
+            if (size() > MAX_MESSAGES) {
+                eldest.getValue().stop();
+                return true;
+            }
+            return false;
+        }
+    };
+    private static final Map<String, VoiceMessagePayload> PAYLOADS = new LinkedHashMap<>(16, 0.75f, true) {
+        @Override protected boolean removeEldestEntry(Map.Entry<String, VoiceMessagePayload> eldest) {
             return size() > MAX_MESSAGES;
         }
     };
@@ -39,6 +50,7 @@ public final class VoiceMessagePlaybackManager {
 
         synchronized (PLAYBACKS) {
             VoiceMessagePlayback previous = PLAYBACKS.put(payload.messageId(), playback);
+            PAYLOADS.put(payload.messageId(), payload);
             if (previous != null) previous.stop();
             lastReceivedMessageId = payload.messageId();
         }
@@ -46,6 +58,14 @@ public final class VoiceMessagePlaybackManager {
 
     public static VoiceMessagePlayback get(String messageId) {
         synchronized (PLAYBACKS) { return PLAYBACKS.get(messageId); }
+    }
+
+    public static VoiceMessagePayload payload(String messageId) {
+        synchronized (PLAYBACKS) { return PAYLOADS.get(messageId); }
+    }
+
+    public static List<String> messageIds() {
+        synchronized (PLAYBACKS) { return List.copyOf(new ArrayList<>(PLAYBACKS.keySet())); }
     }
 
     public static String lastReceivedMessageId() { return lastReceivedMessageId; }
