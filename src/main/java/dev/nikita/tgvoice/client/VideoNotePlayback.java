@@ -2,6 +2,8 @@ package dev.nikita.tgvoice.client;
 
 import dev.nikita.tgvoice.network.VideoNoteContainer;
 
+import java.util.List;
+
 /**
  * Timeline state for a video note. Rendering is deliberately kept separate so
  * playback never owns the camera or a second media device.
@@ -48,11 +50,22 @@ public final class VideoNotePlayback {
     public synchronized boolean isPlaying() { return playing; }
     public VideoNoteContainer.Video video() { return video; }
 
+    /** Returns the last frame whose timestamp is at or before the current position. */
     public synchronized VideoNoteContainer.Frame currentFrame() {
-        VideoNoteContainer.Frame selected = video.frames().getFirst();
-        for (VideoNoteContainer.Frame frame : video.frames()) {
-            if (frame.timestampMillis() > positionMillis) break;
-            selected = frame;
+        List<VideoNoteContainer.Frame> frames = video.frames();
+        VideoNoteContainer.Frame selected = frames.getFirst();
+        int low = 0;
+        int high = frames.size() - 1;
+
+        while (low <= high) {
+            int middle = (low + high) >>> 1;
+            VideoNoteContainer.Frame frame = frames.get(middle);
+            if (frame.timestampMillis() <= positionMillis) {
+                selected = frame;
+                low = middle + 1;
+            } else {
+                high = middle - 1;
+            }
         }
         return selected;
     }
