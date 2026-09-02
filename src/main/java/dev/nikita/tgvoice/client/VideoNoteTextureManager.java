@@ -8,6 +8,7 @@ import net.minecraft.resources.Identifier;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Objects;
 
 /** Owns one dynamic GPU texture for the currently rendered video-note frame. */
@@ -16,6 +17,9 @@ public final class VideoNoteTextureManager implements AutoCloseable {
 
     private final TextureManager textureManager;
     private DynamicTexture texture;
+    private int uploadedHash;
+    private int uploadedWidth;
+    private int uploadedHeight;
 
     public VideoNoteTextureManager(Minecraft client) {
         this.textureManager = Objects.requireNonNull(client.getTextureManager(), "texture manager");
@@ -23,11 +27,9 @@ public final class VideoNoteTextureManager implements AutoCloseable {
 
     /**
      * Uploads an encoded frame into an addon-owned DynamicTexture.
-     *
-     * The texture manager deliberately decodes its own NativeImage instead of
-     * taking ownership of the frame-cache image. This keeps the bounded CPU
-     * cache and the GPU texture lifetime independent and avoids relying on a
-     * version-specific NativeImage copy API.
+     * The GPU texture owns its own decoded image; the CPU frame cache keeps
+     * ownership of its separate NativeImage. Identical consecutive frames are
+     * not decoded/uploaded again.
      */
     public Identifier upload(byte[] encodedImage, int expectedWidth, int expectedHeight) {
         if (encodedImage == null || encodedImage.length == 0) {
@@ -35,6 +37,12 @@ public final class VideoNoteTextureManager implements AutoCloseable {
         }
         if (expectedWidth < 1 || expectedHeight < 1) {
             throw new IllegalArgumentException("invalid expected dimensions");
+        }
+
+        int hash = Arrays.hashCode(encodedImage);
+        if (texture != null && uploadedHash == hash
+                && uploadedWidth == expectedWidth && uploadedHeight == expectedHeight) {
+            return TEXTURE_ID;
         }
 
         closeTexture();
@@ -46,6 +54,9 @@ public final class VideoNoteTextureManager implements AutoCloseable {
             }
             texture = new DynamicTexture(image);
             textureManager.register(TEXTURE_ID, texture);
+            uploadedHash = hash;
+            uploadedWidth = expectedWidth;
+            uploadedHeight = expectedHeight;
             return TEXTURE_ID;
         } catch (IOException exception) {
             throw new IllegalArgumentException("invalid encoded video frame", exception);
@@ -67,5 +78,8 @@ public final class VideoNoteTextureManager implements AutoCloseable {
             textureManager.release(TEXTURE_ID);
             texture = null;
         }
+        uploadedHash = 0;
+        uploadedWidth = 0;
+        uploadedHeight = 0;
     }
 }
