@@ -10,6 +10,7 @@ import java.util.concurrent.CompletableFuture;
 /** Client-side state machine for explicit Voice Messages only. */
 public final class VoiceMessageClient {
     private static final VoiceMessageClient INSTANCE = new VoiceMessageClient();
+    private static final long MIN_DURATION_MS = 200L;
     private static final long MAX_DURATION_MS = VoiceMessagePayload.MAX_DURATION_MILLIS;
 
     private RecordingSession session;
@@ -40,6 +41,10 @@ public final class VoiceMessageClient {
         session.finish();
         RecordingSession result = session;
         session = null;
+
+        // Do not create tiny/empty Telegram-style messages from accidental clicks.
+        if (result.durationMillis() < MIN_DURATION_MS || result.sampleCount() == 0) return result;
+
         publish(result);
         return result;
     }
@@ -66,7 +71,7 @@ public final class VoiceMessageClient {
 
         UUID senderUuid = minecraft.player.getUUID();
         String senderName = minecraft.player.getGameProfile().name();
-        long duration = Math.max(1L, Math.min(MAX_DURATION_MS, recording.durationMillis()));
+        long duration = Math.min(MAX_DURATION_MS, recording.durationMillis());
         byte[] waveform = encodeWaveform(recording.waveform());
 
         CompletableFuture
