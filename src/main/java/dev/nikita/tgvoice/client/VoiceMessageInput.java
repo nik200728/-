@@ -37,13 +37,13 @@ public final class VoiceMessageInput {
 
     private VoiceMessageInput() {}
 
+    public static VoiceMessageInput getInstance() { return INSTANCE; }
+
     public static void register() {
         if (INSTANCE.registered) return;
         INSTANCE.registered = true;
         INSTANCE.setToggle(VoiceMessageConfig.get().toggleMode);
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            // Do not start/cancel recordings while a screen is open. This also prevents
-            // the message controls from hijacking normal inventory/menu mouse input.
             if (client.screen != null) {
                 if (INSTANCE.ptt.isHeld()) INSTANCE.cancel();
                 return;
