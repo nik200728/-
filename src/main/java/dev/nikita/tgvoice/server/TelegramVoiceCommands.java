@@ -1,12 +1,12 @@
 package dev.nikita.tgvoice.server;
 
 import com.mojang.brigadier.CommandDispatcher;
+import dev.nikita.tgvoice.network.BridgeHttpClient;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
 import net.minecraft.commands.CommandSourceStack;
 import net.minecraft.commands.Commands;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerPlayer;
-import dev.nikita.tgvoice.network.BridgeHttpClient;
 
 import java.time.Instant;
 import java.time.ZoneId;
@@ -25,12 +25,9 @@ public final class TelegramVoiceCommands {
     }
 
     private static void register(CommandDispatcher<CommandSourceStack> dispatcher, BridgeHttpClient bridge) {
-        dispatcher.register(Commands.literal("tglink")
-                .executes(context -> createCode(context.getSource(), bridge)));
-        dispatcher.register(Commands.literal("tgunlink")
-                .executes(context -> unlink(context.getSource(), bridge)));
-        dispatcher.register(Commands.literal("tgstatus")
-                .executes(context -> status(context.getSource(), bridge)));
+        dispatcher.register(Commands.literal("tglink").executes(context -> createCode(context.getSource(), bridge)));
+        dispatcher.register(Commands.literal("tgunlink").executes(context -> unlink(context.getSource(), bridge)));
+        dispatcher.register(Commands.literal("tgstatus").executes(context -> status(context.getSource(), bridge)));
     }
 
     private static ServerPlayer player(CommandSourceStack source) {
@@ -40,7 +37,7 @@ public final class TelegramVoiceCommands {
     private static int createCode(CommandSourceStack source, BridgeHttpClient bridge) {
         ServerPlayer player = player(source);
         UUID uuid = player.getUUID();
-        bridge.createLinkCode(uuid).whenComplete((code, error) -> player.server.execute(() -> {
+        bridge.createLinkCode(uuid).whenComplete((code, error) -> player.getServer().execute(() -> {
             if (error != null) {
                 player.sendSystemMessage(Component.literal("§cTelegram Bridge недоступен: " + message(error)));
                 return;
@@ -54,7 +51,7 @@ public final class TelegramVoiceCommands {
 
     private static int unlink(CommandSourceStack source, BridgeHttpClient bridge) {
         ServerPlayer player = player(source);
-        bridge.unlink(player.getUUID()).whenComplete((removed, error) -> player.server.execute(() -> {
+        bridge.unlink(player.getUUID()).whenComplete((removed, error) -> player.getServer().execute(() -> {
             if (error != null) {
                 player.sendSystemMessage(Component.literal("§cНе удалось удалить связь: " + message(error)));
             } else if (Boolean.TRUE.equals(removed)) {
@@ -68,14 +65,12 @@ public final class TelegramVoiceCommands {
 
     private static int status(CommandSourceStack source, BridgeHttpClient bridge) {
         ServerPlayer player = player(source);
-        bridge.linkStatus(player.getUUID()).whenComplete((status, error) -> player.server.execute(() -> {
+        bridge.linkStatus(player.getUUID()).whenComplete((status, error) -> player.getServer().execute(() -> {
             if (error != null) {
                 player.sendSystemMessage(Component.literal("§cНе удалось получить статус: " + message(error)));
             } else if (status.linked()) {
                 player.sendSystemMessage(Component.literal("§aMinecraft ↔ Telegram: подключено."));
-                if (status.telegramUserId() != null) {
-                    player.sendSystemMessage(Component.literal("§7Telegram user ID: §f" + status.telegramUserId()));
-                }
+                if (status.telegramUserId() != null) player.sendSystemMessage(Component.literal("§7Telegram user ID: §f" + status.telegramUserId()));
             } else {
                 player.sendSystemMessage(Component.literal("§eMinecraft ↔ Telegram: не подключено."));
             }
