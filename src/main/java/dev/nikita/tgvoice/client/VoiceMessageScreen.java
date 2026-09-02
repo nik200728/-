@@ -1,9 +1,10 @@
 package dev.nikita.tgvoice.client;
 
 import dev.nikita.tgvoice.network.VoiceMessagePayload;
-import net.minecraft.client.gui.GuiGraphics;
+import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
+import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 
 /** Small, non-invasive Telegram-style voice message player screen. */
@@ -29,7 +30,7 @@ public final class VoiceMessageScreen extends Screen {
         playButton = Button.builder(buttonText(), button -> togglePlayback())
                 .bounds(cardLeft + 18, cardTop + 92, 92, 28).build();
         addRenderableWidget(playButton);
-        addRenderableWidget(Button.builder(Component.translatable("gui.done"), button -> close())
+        addRenderableWidget(Button.builder(Component.translatable("gui.done"), button -> onClose())
                 .bounds(cardLeft + CARD_WIDTH - 112, cardTop + 92, 94, 28).build());
     }
 
@@ -39,7 +40,9 @@ public final class VoiceMessageScreen extends Screen {
     }
 
     @Override
-    public void render(GuiGraphics graphics, int mouseX, int mouseY, float delta) {
+    public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
+        super.extractRenderState(graphics, mouseX, mouseY, delta);
+
         graphics.fill(0, 0, width, height, 0x99000000);
         graphics.fill(cardLeft, cardTop, cardLeft + CARD_WIDTH, cardTop + CARD_HEIGHT, 0xFF202124);
         graphics.fill(cardLeft, cardTop, cardLeft + CARD_WIDTH, cardTop + 2, 0xFF5B9BF5);
@@ -47,19 +50,22 @@ public final class VoiceMessageScreen extends Screen {
         VoiceMessagePayload payload = VoiceMessagePlaybackManager.payload(messageId);
         VoiceMessagePlayback playback = VoiceMessagePlaybackManager.get(messageId);
         if (payload != null && playback != null) {
-            graphics.drawString(font, Component.literal(payload.senderName()), cardLeft + 18, cardTop + 16, 0xFFFFFFFF);
-            graphics.drawString(font, formatDuration(playback.positionMillis()) + " / " + formatDuration(payload.durationMillis()),
-                    cardLeft + CARD_WIDTH - 112, cardTop + 16, 0xFFB8B8B8);
+            graphics.text(font, Component.literal(payload.senderName()), cardLeft + 18, cardTop + 16, 0xFFFFFFFF, true);
+            graphics.text(font,
+                    formatDuration(playback.positionMillis()) + " / " + formatDuration(payload.durationMillis()),
+                    cardLeft + CARD_WIDTH - 112, cardTop + 16, 0xFFB8B8B8, false);
             drawWaveform(graphics, payload.waveform(), playback.progress(), cardLeft + 18, cardTop + 38, CARD_WIDTH - 36, WAVE_HEIGHT);
         } else {
-            graphics.drawString(font, Component.translatable("screen.tgvoice.message_unavailable"), cardLeft + 18, cardTop + 24, 0xFFFFFFFF);
+            graphics.text(font, Component.translatable("screen.tgvoice.message_unavailable"),
+                    cardLeft + 18, cardTop + 24, 0xFFFFFFFF, true);
         }
-        super.render(graphics, mouseX, mouseY, delta);
     }
 
     @Override
-    public boolean mouseClicked(double mouseX, double mouseY, int button) {
-        if (button == 0) {
+    public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
+        if (event.button() == 0) {
+            double mouseX = event.x();
+            double mouseY = event.y();
             int x = cardLeft + 18, y = cardTop + 38, w = CARD_WIDTH - 36;
             if (mouseX >= x && mouseX <= x + w && mouseY >= y && mouseY <= y + WAVE_HEIGHT) {
                 VoiceMessagePayload payload = VoiceMessagePlaybackManager.payload(messageId);
@@ -70,7 +76,13 @@ public final class VoiceMessageScreen extends Screen {
                 return true;
             }
         }
-        return super.mouseClicked(mouseX, mouseY, button);
+        return super.mouseClicked(event, doubleClick);
+    }
+
+    @Override
+    public void onClose() {
+        VoiceMessagePlaybackManager.stop(messageId);
+        super.onClose();
     }
 
     private void togglePlayback() {
@@ -91,7 +103,8 @@ public final class VoiceMessageScreen extends Screen {
                 : Component.translatable("screen.tgvoice.play");
     }
 
-    private static void drawWaveform(GuiGraphics graphics, byte[] waveform, float progress, int x, int y, int width, int height) {
+    private static void drawWaveform(GuiGraphicsExtractor graphics, byte[] waveform, float progress,
+                                     int x, int y, int width, int height) {
         if (waveform == null || waveform.length == 0) return;
         int bars = Math.min(waveform.length, width);
         for (int i = 0; i < bars; i++) {
