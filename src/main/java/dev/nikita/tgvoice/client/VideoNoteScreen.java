@@ -46,6 +46,9 @@ public final class VideoNoteScreen extends Screen {
         graphics.text(font, Component.literal("ESC"), left + PANEL_WIDTH - 45, top + 18, 0xFF7F8DA0, false);
 
         if (messages.isEmpty()) {
+            textureManager.clear();
+            frameCache.clear();
+            selectedIndex = 0;
             graphics.centeredText(font, Component.literal("No video notes"), width / 2, top + 180, 0xFFB9C2CF);
             return;
         }
@@ -57,6 +60,7 @@ public final class VideoNoteScreen extends Screen {
         try {
             state = VideoNoteRenderState.from(payload, playback, frameCache);
         } catch (RuntimeException error) {
+            textureManager.clear();
             graphics.centeredText(font, Component.literal("Invalid video note"), width / 2, top + 180, 0xFFFF8A8A);
             return;
         }
@@ -65,7 +69,14 @@ public final class VideoNoteScreen extends Screen {
         int cy = top + 148;
         int imageLeft = cx - VIDEO_RADIUS;
         int imageTop = cy - VIDEO_RADIUS;
-        Identifier texture = textureManager.upload(playback.currentFrame().encodedImage(), state.width(), state.height());
+        Identifier texture;
+        try {
+            texture = textureManager.upload(playback.currentFrame().encodedImage(), state.width(), state.height());
+        } catch (RuntimeException error) {
+            textureManager.clear();
+            graphics.centeredText(font, Component.literal("Invalid video frame"), width / 2, top + 180, 0xFFFF8A8A);
+            return;
+        }
 
         graphics.fill(imageLeft - 6, imageTop - 6, imageLeft + VIDEO_SIZE + 6, imageTop + VIDEO_SIZE + 6, 0xFF303A49);
         graphics.blit(RenderPipelines.GUI_TEXTURED, texture, imageLeft, imageTop,
