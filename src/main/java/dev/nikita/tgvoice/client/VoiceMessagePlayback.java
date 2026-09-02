@@ -18,6 +18,8 @@ import java.util.concurrent.CompletableFuture;
 public final class VoiceMessagePlayback {
     private static final Logger LOGGER = LoggerFactory.getLogger("tgvoice/playback");
     private static final int SAMPLE_RATE = 48_000;
+    private static final int FRAME_MILLIS = 20;
+    private static final long FRAME_NANOS = FRAME_MILLIS * 1_000_000L;
     private static final int MAX_OGG_BYTES = 2 * 1024 * 1024;
 
     public enum State { STOPPED, PLAYING, PAUSED }
@@ -28,6 +30,8 @@ public final class VoiceMessagePlayback {
     private State state = State.STOPPED;
     private long positionMillis;
     private long durationMillis;
+    private long lastPumpNanos;
+    private boolean pendingPlay;
     private LoopbackSource source;
     private List<short[]> decodedFrames = List.of();
     private int frameIndex;
@@ -49,6 +53,7 @@ public final class VoiceMessagePlayback {
             this.decodedFrames = List.of();
             this.frameIndex = 0;
             this.frameSampleOffset = 0;
+            this.pendingPlay = false;
         }
 
         byte[] copy = Arrays.copyOf(oggOpus, oggOpus.length);
@@ -57,10 +62,13 @@ public final class VoiceMessagePlayback {
 
     public void play() {
         synchronized (lock) {
-            if (decodedFrames.isEmpty() || durationMillis <= 0 || positionMillis >= durationMillis) return;
-            ensureSource();
-            state = State.PLAYING;
-            pumpLocked();
+            if (durationMillis <= 0 || positionMillis >= durationMillis) return;
+            if (decodedFrames.isEmpty()) {
+                pendingPlay = true;
+                return;
+            }
+            pendingPlay = false;
+            startPlaybackLocked();
         }
     }
 
@@ -73,8 +81,7 @@ public final class VoiceMessagePlayback {
     public void resume() {
         synchronized (lock) {
             if (state == State.PAUSED) {
-                state = State.PLAYING;
-                pumpLocked();
+                startPlaybackLocked();
             }
         }
     }
@@ -85,10 +92,9 @@ public final class VoiceMessagePlayback {
             positionMillis = 0;
             frameIndex = 0;
             frameSampleOffset = 0;
-            if (source != null) {
-                source.close();
-                source = null;
-            }
+            pendingPlay = false;
+            lastPumpNanos = 0;
+            closeSourceLocked();
         }
     }
 
@@ -96,28 +102,43 @@ public final class VoiceMessagePlayback {
         synchronized (lock) {
             long target = Math.max(0, Math.min(durationMillis, millis));
             long targetSampleLong = target * SAMPLE_RATE / 1000L;
-            int remaining = (int) Math.min(Integer.MAX_VALUE, targetSampleLong);
+            long remaining = targetSampleLong;
             frameIndex = 0;
             frameSampleOffset = 0;
             while (frameIndex < decodedFrames.size()) {
                 int size = decodedFrames.get(frameIndex).length;
                 if (remaining < size) {
-                    frameSampleOffset = remaining;
+                    frameSampleOffset = (int) remaining;
                     break;
                 }
                 remaining -= size;
                 frameIndex++;
             }
             positionMillis = target;
-            if (positionMillis >= durationMillis && durationMillis > 0) state = State.STOPPED;
-            else if (state == State.PLAYING) pumpLocked();
+            if (positionMillis >= durationMillis && durationMillis > 0) {
+                state = State.STOPPED;
+                closeSourceLocked();
+            } else if (state == State.PLAYING) {
+                // Recreate the source so samples queued before the seek cannot leak
+                // into the newly selected position.
+                closeSourceLocked();
+                startPlaybackLocked();
+            }
         }
     }
 
-    /** Called from the client tick to feed another 20 ms PCM block into PV. */
+    /** Called from the client tick to feed PCM according to elapsed wall-clock time. */
     public void tick() {
         synchronized (lock) {
-            if (state == State.PLAYING) pumpLocked();
+            if (state != State.PLAYING) return;
+            long now = System.nanoTime();
+            if (lastPumpNanos == 0) lastPumpNanos = now;
+            long elapsed = Math.max(0, now - lastPumpNanos);
+            int framesDue = (int) Math.min(8, elapsed / FRAME_NANOS);
+            if (framesDue > 0) {
+                for (int i = 0; i < framesDue && state == State.PLAYING; i++) pumpLocked();
+                lastPumpNanos += framesDue * FRAME_NANOS;
+            }
         }
     }
 
@@ -126,8 +147,16 @@ public final class VoiceMessagePlayback {
     public long durationMillis() { synchronized (lock) { return durationMillis; } }
     public float progress() {
         synchronized (lock) {
-            return durationMillis <= 0 ? 0f : (float) positionMillis / durationMillis;
+            return durationMillis <= 0 ? 0f : Math.min(1f, Math.max(0f, (float) positionMillis / durationMillis));
         }
+    }
+
+    private void startPlaybackLocked() {
+        if (decodedFrames.isEmpty() || durationMillis <= 0 || positionMillis >= durationMillis) return;
+        ensureSource();
+        state = State.PLAYING;
+        lastPumpNanos = System.nanoTime();
+        pumpLocked();
     }
 
     private void decode(byte[] ogg) {
@@ -144,15 +173,30 @@ public final class VoiceMessagePlayback {
             }
             synchronized (lock) {
                 decodedFrames = List.copyOf(frames);
+                if (durationMillis <= 0) {
+                    long samples = decodedFrames.stream().mapToLong(a -> a.length).sum();
+                    durationMillis = samples * 1000L / SAMPLE_RATE;
+                }
+                if (pendingPlay && !decodedFrames.isEmpty()) {
+                    pendingPlay = false;
+                    startPlaybackLocked();
+                }
             }
         } catch (CodecException | RuntimeException e) {
             LOGGER.warn("Failed to decode Voice Message", e);
             synchronized (lock) {
                 decodedFrames = List.of();
+                pendingPlay = false;
                 state = State.STOPPED;
             }
         } finally {
-            if (decoder != null) decoder.close();
+            if (decoder != null) {
+                try {
+                    decoder.close();
+                } catch (RuntimeException e) {
+                    LOGGER.debug("Failed to close Voice Message decoder", e);
+                }
+            }
         }
     }
 
@@ -167,11 +211,19 @@ public final class VoiceMessagePlayback {
         }
     }
 
+    private void closeSourceLocked() {
+        if (source != null) {
+            source.close();
+            source = null;
+        }
+    }
+
     private void pumpLocked() {
         if (source == null || source.isClosed() || state != State.PLAYING) return;
         if (frameIndex >= decodedFrames.size()) {
             state = State.STOPPED;
             positionMillis = durationMillis;
+            closeSourceLocked();
             return;
         }
 
@@ -186,7 +238,11 @@ public final class VoiceMessagePlayback {
         int writtenSamples = frame.length;
         frameIndex++;
         positionMillis = Math.min(durationMillis, positionMillis + writtenSamples * 1000L / SAMPLE_RATE);
-        if (positionMillis >= durationMillis || frameIndex >= decodedFrames.size()) state = State.STOPPED;
+        if (positionMillis >= durationMillis || frameIndex >= decodedFrames.size()) {
+            state = State.STOPPED;
+            positionMillis = durationMillis;
+            closeSourceLocked();
+        }
     }
 
     /** Parses Ogg pages into complete Opus packets and removes OpusHead/OpusTags. */
