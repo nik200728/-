@@ -1,0 +1,129 @@
+package dev.nikita.tgvoice.client;
+
+import org.openpnp.capture.CaptureDevice;
+import org.openpnp.capture.CaptureFormat;
+import org.openpnp.capture.CaptureStream;
+import org.openpnp.capture.OpenPnpCapture;
+
+import java.awt.Dimension;
+import java.awt.Graphics2D;
+import java.awt.RenderingHints;
+import java.awt.image.BufferedImage;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.util.List;
+import javax.imageio.ImageIO;
+
+/**
+ * Thin client-side webcam adapter. Camera access stays isolated from the video
+ * transport format so the recorder can be tested without a camera device.
+ */
+public final class WebcamCaptureService implements AutoCloseable {
+    public static final int TARGET_SIZE = 512;
+    private static final String JPEG_FORMAT = "jpg";
+
+    private final OpenPnpCapture capture;
+    private CaptureStream stream;
+    private int width;
+    private int height;
+
+    public WebcamCaptureService() {
+        capture = new OpenPnpCapture();
+    }
+
+    /** Opens the first available camera and a format no larger than 512x512 when possible. */
+    public synchronized void open() throws Exception {
+        if (stream != null) return;
+
+        List<CaptureDevice> devices = capture.getDevices();
+        if (devices.isEmpty()) {
+            throw new IllegalStateException("No webcam detected");
+        }
+
+        CaptureDevice device = devices.get(0);
+        CaptureFormat selected = selectFormat(device.getFormats());
+        if (selected == null) {
+            throw new IllegalStateException("No supported webcam format detected");
+        }
+
+        stream = device.openStream(selected);
+        width = selected.getWidth();
+        height = selected.getHeight();
+    }
+
+    public synchronized boolean isOpen() {
+        return stream != null;
+    }
+
+    /** Captures the newest available frame, scaled/cropped to a square JPEG. */
+    public synchronized byte[] captureJpeg() throws IOException {
+        if (stream == null) {
+            throw new IllegalStateException("Webcam is not open");
+        }
+        BufferedImage source = stream.capture();
+        if (source == null) return null;
+
+        BufferedImage square = centerSquare(source);
+        BufferedImage output = scale(square, TARGET_SIZE, TARGET_SIZE);
+        ByteArrayOutputStream bytes = new ByteArrayOutputStream(32 * 1024);
+        if (!ImageIO.write(output, JPEG_FORMAT, bytes)) {
+            throw new IOException("JPEG encoder is unavailable");
+        }
+        return bytes.toByteArray();
+    }
+
+    public synchronized Dimension resolution() {
+        return new Dimension(width, height);
+    }
+
+    @Override
+    public synchronized void close() {
+        if (stream != null) {
+            try {
+                stream.close();
+            } catch (Exception ignored) {
+                // Camera cleanup must not prevent Minecraft from shutting down.
+            }
+            stream = null;
+        }
+        capture.close();
+    }
+
+    private static CaptureFormat selectFormat(List<CaptureFormat> formats) {
+        if (formats == null || formats.isEmpty()) return null;
+        CaptureFormat best = null;
+        long bestScore = Long.MAX_VALUE;
+        for (CaptureFormat format : formats) {
+            int w = format.getWidth();
+            int h = format.getHeight();
+            if (w < 1 || h < 1) continue;
+            long score = Math.abs((long) w * h - (long) TARGET_SIZE * TARGET_SIZE);
+            if (w > TARGET_SIZE || h > TARGET_SIZE) score += 10_000_000L;
+            if (score < bestScore) {
+                best = format;
+                bestScore = score;
+            }
+        }
+        return best;
+    }
+
+    private static BufferedImage centerSquare(BufferedImage source) {
+        int side = Math.min(source.getWidth(), source.getHeight());
+        int x = (source.getWidth() - side) / 2;
+        int y = (source.getHeight() - side) / 2;
+        return source.getSubimage(x, y, side, side);
+    }
+
+    private static BufferedImage scale(BufferedImage source, int targetWidth, int targetHeight) {
+        BufferedImage output = new BufferedImage(targetWidth, targetHeight, BufferedImage.TYPE_INT_RGB);
+        Graphics2D graphics = output.createGraphics();
+        try {
+            graphics.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+            graphics.setRenderingHint(RenderingHints.KEY_RENDERING, RenderingHints.VALUE_RENDER_QUALITY);
+            graphics.drawImage(source, 0, 0, targetWidth, targetHeight, null);
+        } finally {
+            graphics.dispose();
+        }
+        return output;
+    }
+}
