@@ -1,6 +1,7 @@
 package nik200728.tgvoice.client;
 
 import dev.nikita.tgvoice.client.PlasmoVoiceClientAddon;
+import dev.nikita.tgvoice.client.VoiceMessagePlaybackManager;
 import net.fabricmc.api.ClientModInitializer;
 import su.plo.voice.api.client.PlasmoVoiceClient;
 
@@ -10,9 +11,10 @@ public final class TelegramVoiceClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
-        // Plasmo Voice owns the microphone lifecycle. We only register an addon
-        // that observes its processed capture event while a Voice Message is active.
+        // Plasmo Voice owns the microphone lifecycle. We only observe its processed
+        // capture event while a Voice Message is being recorded.
         PlasmoVoiceClient.getAddonsLoader().load(new PlasmoVoiceClientAddon());
         VoiceMessageInputController.register();
+        VoiceMessagePlaybackManager.register();
     }
 }
