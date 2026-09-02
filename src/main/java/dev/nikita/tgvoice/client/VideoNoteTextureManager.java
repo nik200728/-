@@ -17,7 +17,7 @@ public final class VideoNoteTextureManager implements AutoCloseable {
 
     private final TextureManager textureManager;
     private DynamicTexture texture;
-    private int uploadedHash;
+    private byte[] uploadedImage;
     private int uploadedWidth;
     private int uploadedHeight;
 
@@ -34,9 +34,10 @@ public final class VideoNoteTextureManager implements AutoCloseable {
             throw new IllegalArgumentException("invalid expected dimensions");
         }
 
-        int hash = Arrays.hashCode(encodedImage);
-        if (texture != null && uploadedHash == hash
-                && uploadedWidth == expectedWidth && uploadedHeight == expectedHeight) {
+        // Compare the actual bytes rather than relying on Arrays.hashCode alone: different
+        // JPEG payloads can have the same 32-bit hash and would otherwise leave a stale frame.
+        if (texture != null && uploadedWidth == expectedWidth && uploadedHeight == expectedHeight
+                && Arrays.equals(uploadedImage, encodedImage)) {
             return TEXTURE_ID;
         }
 
@@ -50,7 +51,7 @@ public final class VideoNoteTextureManager implements AutoCloseable {
             applyCircularAlphaMask(image);
             texture = new DynamicTexture(() -> "tgvoice-video-note", image);
             textureManager.register(TEXTURE_ID, texture);
-            uploadedHash = hash;
+            uploadedImage = Arrays.copyOf(encodedImage, encodedImage.length);
             uploadedWidth = expectedWidth;
             uploadedHeight = expectedHeight;
             return TEXTURE_ID;
@@ -90,7 +91,7 @@ public final class VideoNoteTextureManager implements AutoCloseable {
             textureManager.release(TEXTURE_ID);
             texture = null;
         }
-        uploadedHash = 0;
+        uploadedImage = null;
         uploadedWidth = 0;
         uploadedHeight = 0;
     }
