@@ -20,7 +20,13 @@ dependencies {
     minecraft "com.mojang:minecraft:${project.minecraft_version}"
     implementation "net.fabricmc:fabric-loader:${project.loader_version}"
     implementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
-    implementation "org.openpnp:openpnp-capture-java:${project.openpnp_capture_version}"
+
+    // OpenPnP Capture Java ships the native capture binaries inside its jar.
+    // Bundle both it and its JNA runtime so webcam capture is available from the
+    // final Fabric mod instead of depending on a separately installed library.
+    include "org.openpnp:openpnp-capture-java:${project.openpnp_capture_version}"
+    include "net.java.dev.jna:jna:5.13.0"
+
     compileOnly "su.plo.voice.api:client:${project.plasmo_voice_api_version}"
     compileOnly "su.plo.voice.api:server:${project.plasmo_voice_api_version}"
 }
