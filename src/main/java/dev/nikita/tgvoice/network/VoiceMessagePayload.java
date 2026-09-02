@@ -1,6 +1,5 @@
 package dev.nikita.tgvoice.network;
 
-import io.netty.buffer.ByteBuf;
 import net.minecraft.network.RegistryFriendlyByteBuf;
 import net.minecraft.network.codec.ByteBufCodecs;
 import net.minecraft.network.codec.StreamCodec;
@@ -26,7 +25,7 @@ public record VoiceMessagePayload(
     public static final CustomPacketPayload.Type<VoiceMessagePayload> TYPE =
             new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath("tgvoice", "voice_message"));
 
-    public static final StreamCodec<ByteBuf, VoiceMessagePayload> CODEC = StreamCodec.composite(
+    public static final StreamCodec<RegistryFriendlyByteBuf, VoiceMessagePayload> CODEC = StreamCodec.composite(
             ByteBufCodecs.STRING_UTF8,
             VoiceMessagePayload::messageId,
             ByteBufCodecs.UUID,
@@ -43,31 +42,17 @@ public record VoiceMessagePayload(
     );
 
     public VoiceMessagePayload {
-        if (messageId == null || messageId.isBlank() || messageId.length() > 64) {
-            throw new IllegalArgumentException("invalid messageId");
-        }
+        if (messageId == null || messageId.isBlank() || messageId.length() > 64) throw new IllegalArgumentException("invalid messageId");
         if (senderUuid == null) throw new IllegalArgumentException("senderUuid is required");
-        if (senderName == null || senderName.isBlank() || senderName.length() > 64) {
-            throw new IllegalArgumentException("invalid senderName");
-        }
-        if (durationMillis < 1 || durationMillis > MAX_DURATION_MILLIS) {
-            throw new IllegalArgumentException("invalid duration");
-        }
-        if (opusData == null || opusData.length == 0 || opusData.length > MAX_AUDIO_BYTES) {
-            throw new IllegalArgumentException("invalid audio payload");
-        }
-        if (waveform == null || waveform.length == 0 || waveform.length > MAX_WAVEFORM_BYTES) {
-            throw new IllegalArgumentException("invalid waveform");
-        }
+        if (senderName == null || senderName.isBlank() || senderName.length() > 64) throw new IllegalArgumentException("invalid senderName");
+        if (durationMillis < 1 || durationMillis > MAX_DURATION_MILLIS) throw new IllegalArgumentException("invalid duration");
+        if (opusData == null || opusData.length == 0 || opusData.length > MAX_AUDIO_BYTES) throw new IllegalArgumentException("invalid audio payload");
+        if (waveform == null || waveform.length == 0 || waveform.length > MAX_WAVEFORM_BYTES) throw new IllegalArgumentException("invalid waveform");
         opusData = Arrays.copyOf(opusData, opusData.length);
         waveform = Arrays.copyOf(waveform, waveform.length);
     }
 
-    @Override
-    public Type<? extends CustomPacketPayload> type() {
-        return TYPE;
-    }
-
+    @Override public Type<? extends CustomPacketPayload> type() { return TYPE; }
     @Override public byte[] opusData() { return Arrays.copyOf(opusData, opusData.length); }
     @Override public byte[] waveform() { return Arrays.copyOf(waveform, waveform.length); }
 }
