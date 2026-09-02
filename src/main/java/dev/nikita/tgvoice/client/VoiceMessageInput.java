@@ -51,6 +51,13 @@ public final class VoiceMessageInput {
             while (RECORD_KEY.consumeClick()) INSTANCE.press();
             if (!INSTANCE.toggle && !RECORD_KEY.isDown() && INSTANCE.ptt.isHeld()) INSTANCE.release();
             while (CANCEL_KEY.consumeClick()) INSTANCE.cancel();
+
+            // The recording gesture deliberately uses the normal LMB binding, so keep
+            // Minecraft's attack action from firing while a voice message is active.
+            // Outside a recording the vanilla attack binding is untouched.
+            if (VoiceMessageClient.getInstance().isRecording()) {
+                client.options.keyAttack.setDown(false);
+            }
         });
     }
 
