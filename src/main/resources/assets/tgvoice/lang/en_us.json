@@ -1,4 +1,8 @@
 {
-  "key.category.tgvoice.voice_messages": "Voice Messages",
-  "key.tgvoice.record": "Record Voice Message"
+  "key.tgvoice.record": "Record voice message",
+  "key.tgvoice.open_messages": "Open voice messages",
+  "screen.tgvoice.voice_messages": "Voice messages",
+  "screen.tgvoice.message_unavailable": "Voice message unavailable",
+  "screen.tgvoice.play": "Play",
+  "screen.tgvoice.pause": "Pause"
 }
