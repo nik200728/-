@@ -7,73 +7,116 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.input.MouseButtonEvent;
 import net.minecraft.network.chat.Component;
 
-/** Small, non-invasive Telegram-style voice message player screen. */
+import java.util.List;
+
+/** Compact Telegram-style inbox that stays completely separate from Plasmo Voice UI. */
 public final class VoiceMessageScreen extends Screen {
-    private static final int CARD_WIDTH = 430;
-    private static final int CARD_HEIGHT = 150;
-    private static final int WAVE_HEIGHT = 44;
+    private static final int CARD_WIDTH = 520;
+    private static final int ROW_HEIGHT = 86;
+    private static final int MAX_VISIBLE = 5;
+    private static final int WAVE_HEIGHT = 28;
 
-    private final String messageId;
-    private Button playButton;
-    private int cardLeft;
-    private int cardTop;
+    private List<String> messageIds = List.of();
+    private int listLeft;
+    private int listTop;
 
-    public VoiceMessageScreen(String messageId) {
+    public VoiceMessageScreen() {
         super(Component.translatable("screen.tgvoice.voice_messages"));
-        this.messageId = messageId;
     }
 
     @Override
     protected void init() {
-        cardLeft = (width - CARD_WIDTH) / 2;
-        cardTop = (height - CARD_HEIGHT) / 2;
-        playButton = Button.builder(buttonText(), button -> togglePlayback())
-                .bounds(cardLeft + 18, cardTop + 92, 92, 28).build();
-        addRenderableWidget(playButton);
+        rebuildWidgets();
+    }
+
+    private void rebuildWidgets() {
+        clearWidgets();
+        messageIds = VoiceMessagePlaybackManager.messageIds();
+        listLeft = (width - CARD_WIDTH) / 2;
+        listTop = Math.max(34, (height - Math.min(MAX_VISIBLE, messageIds.size()) * ROW_HEIGHT) / 2);
+
+        int visible = Math.min(MAX_VISIBLE, messageIds.size());
+        for (int i = 0; i < visible; i++) {
+            String id = messageIds.get(messageIds.size() - 1 - i);
+            VoiceMessagePlayback playback = VoiceMessagePlaybackManager.get(id);
+            if (playback == null) continue;
+            final String messageId = id;
+            addRenderableWidget(Button.builder(buttonText(playback), button -> togglePlayback(messageId))
+                    .bounds(listLeft + 16, listTop + i * ROW_HEIGHT + 48, 92, 26).build());
+            addRenderableWidget(Button.builder(Component.translatable("screen.tgvoice.stop"), button -> VoiceMessagePlaybackManager.stop(messageId))
+                    .bounds(listLeft + 116, listTop + i * ROW_HEIGHT + 48, 74, 26).build());
+        }
         addRenderableWidget(Button.builder(Component.translatable("gui.done"), button -> onClose())
-                .bounds(cardLeft + CARD_WIDTH - 112, cardTop + 92, 94, 28).build());
+                .bounds(listLeft + CARD_WIDTH - 100, Math.min(height - 38, listTop + visible * ROW_HEIGHT + 8), 84, 26).build());
     }
 
     @Override
     public void tick() {
-        if (playButton != null) playButton.setMessage(buttonText());
+        List<String> current = VoiceMessagePlaybackManager.messageIds();
+        if (!current.equals(messageIds)) {
+            rebuildWidgets();
+            return;
+        }
+        // Keep play/pause labels in sync with the playback state.
+        for (int i = 0; i < Math.min(MAX_VISIBLE, messageIds.size()); i++) {
+            String id = messageIds.get(messageIds.size() - 1 - i);
+            VoiceMessagePlayback playback = VoiceMessagePlaybackManager.get(id);
+            if (playback != null) {
+                // Widget ordering is stable: play, stop for each visible message.
+                int index = i * 2;
+                if (index < children().size() && children().get(index) instanceof Button button) {
+                    button.setMessage(buttonText(playback));
+                }
+            }
+        }
     }
 
     @Override
     public void extractRenderState(GuiGraphicsExtractor graphics, int mouseX, int mouseY, float delta) {
         super.extractRenderState(graphics, mouseX, mouseY, delta);
-
         graphics.fill(0, 0, width, height, 0x99000000);
-        graphics.fill(cardLeft, cardTop, cardLeft + CARD_WIDTH, cardTop + CARD_HEIGHT, 0xFF202124);
-        graphics.fill(cardLeft, cardTop, cardLeft + CARD_WIDTH, cardTop + 2, 0xFF5B9BF5);
 
-        VoiceMessagePayload payload = VoiceMessagePlaybackManager.payload(messageId);
-        VoiceMessagePlayback playback = VoiceMessagePlaybackManager.get(messageId);
-        if (payload != null && playback != null) {
-            graphics.text(font, Component.literal(payload.senderName()), cardLeft + 18, cardTop + 16, 0xFFFFFFFF, true);
+        int visible = Math.min(MAX_VISIBLE, messageIds.size());
+        int panelTop = listTop - 34;
+        int panelBottom = Math.min(height - 4, listTop + visible * ROW_HEIGHT + 44);
+        graphics.fill(listLeft, panelTop, listLeft + CARD_WIDTH, panelBottom, 0xFF202124);
+        graphics.fill(listLeft, panelTop, listLeft + CARD_WIDTH, panelTop + 2, 0xFF5B9BF5);
+        graphics.text(font, Component.translatable("screen.tgvoice.voice_messages"), listLeft + 16, panelTop + 12, 0xFFFFFFFF, true);
+
+        for (int i = 0; i < visible; i++) {
+            String id = messageIds.get(messageIds.size() - 1 - i);
+            VoiceMessagePayload payload = VoiceMessagePlaybackManager.payload(id);
+            VoiceMessagePlayback playback = VoiceMessagePlaybackManager.get(id);
+            if (payload == null || playback == null) continue;
+
+            int top = listTop + i * ROW_HEIGHT;
+            graphics.fill(listLeft + 10, top, listLeft + CARD_WIDTH - 10, top + ROW_HEIGHT - 4, 0xFF292A2D);
+            graphics.text(font, Component.literal(payload.senderName()), listLeft + 16, top + 8, 0xFFFFFFFF, true);
             graphics.text(font,
                     formatDuration(playback.positionMillis()) + " / " + formatDuration(payload.durationMillis()),
-                    cardLeft + CARD_WIDTH - 112, cardTop + 16, 0xFFB8B8B8, false);
-            drawWaveform(graphics, payload.waveform(), playback.progress(), cardLeft + 18, cardTop + 38, CARD_WIDTH - 36, WAVE_HEIGHT);
-        } else {
-            graphics.text(font, Component.translatable("screen.tgvoice.message_unavailable"),
-                    cardLeft + 18, cardTop + 24, 0xFFFFFFFF, true);
+                    listLeft + CARD_WIDTH - 112, top + 8, 0xFFB8B8B8, false);
+            drawWaveform(graphics, payload.waveform(), playback.progress(), listLeft + 204, top + 10, CARD_WIDTH - 222, WAVE_HEIGHT);
         }
     }
 
     @Override
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
         if (event.button() == 0) {
-            double mouseX = event.x();
-            double mouseY = event.y();
-            int x = cardLeft + 18, y = cardTop + 38, w = CARD_WIDTH - 36;
-            if (mouseX >= x && mouseX <= x + w && mouseY >= y && mouseY <= y + WAVE_HEIGHT) {
-                VoiceMessagePayload payload = VoiceMessagePlaybackManager.payload(messageId);
-                if (payload != null) {
-                    float progress = (float) ((mouseX - x) / w);
-                    VoiceMessagePlaybackManager.seek(messageId, (long) (payload.durationMillis() * progress));
+            double x = event.x();
+            double y = event.y();
+            int visible = Math.min(MAX_VISIBLE, messageIds.size());
+            for (int i = 0; i < visible; i++) {
+                String id = messageIds.get(messageIds.size() - 1 - i);
+                VoiceMessagePayload payload = VoiceMessagePlaybackManager.payload(id);
+                if (payload == null) continue;
+                int top = listTop + i * ROW_HEIGHT;
+                int waveX = listLeft + 204;
+                int waveW = CARD_WIDTH - 222;
+                if (x >= waveX && x <= waveX + waveW && y >= top + 10 && y <= top + 10 + WAVE_HEIGHT) {
+                    float progress = (float) ((x - waveX) / waveW);
+                    VoiceMessagePlaybackManager.seek(id, (long) (payload.durationMillis() * progress));
+                    return true;
                 }
-                return true;
             }
         }
         return super.mouseClicked(event, doubleClick);
@@ -81,11 +124,11 @@ public final class VoiceMessageScreen extends Screen {
 
     @Override
     public void onClose() {
-        VoiceMessagePlaybackManager.stop(messageId);
+        for (String id : messageIds) VoiceMessagePlaybackManager.stop(id);
         super.onClose();
     }
 
-    private void togglePlayback() {
+    private static void togglePlayback(String messageId) {
         VoiceMessagePlayback playback = VoiceMessagePlaybackManager.get(messageId);
         if (playback == null) return;
         switch (playback.state()) {
@@ -95,9 +138,7 @@ public final class VoiceMessageScreen extends Screen {
         }
     }
 
-    private Component buttonText() {
-        VoiceMessagePlayback playback = VoiceMessagePlaybackManager.get(messageId);
-        if (playback == null) return Component.translatable("screen.tgvoice.play");
+    private static Component buttonText(VoiceMessagePlayback playback) {
         return playback.state() == VoiceMessagePlayback.State.PLAYING
                 ? Component.translatable("screen.tgvoice.pause")
                 : Component.translatable("screen.tgvoice.play");
