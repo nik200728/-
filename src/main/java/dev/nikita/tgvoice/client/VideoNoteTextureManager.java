@@ -87,7 +87,6 @@ public final class VideoNoteTextureManager implements AutoCloseable {
 
     private void closeTexture() {
         if (texture != null) {
-            texture.close();
             textureManager.release(TEXTURE_ID);
             texture = null;
         }
