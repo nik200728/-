@@ -26,10 +26,9 @@ public final class VideoNoteTextureManager implements AutoCloseable {
     }
 
     /**
-     * Uploads an encoded frame into an addon-owned DynamicTexture.
-     * The GPU texture owns its own decoded image; the CPU frame cache keeps
-     * ownership of its separate NativeImage. Identical consecutive frames are
-     * not decoded/uploaded again.
+     * Decodes and uploads a frame owned by the GPU texture. The alpha mask is
+     * applied before upload so the presentation remains a real circular video
+     * note rather than a square image with a decorative ring around it.
      */
     public Identifier upload(byte[] encodedImage, int expectedWidth, int expectedHeight) {
         if (encodedImage == null || encodedImage.length == 0) {
@@ -52,6 +51,7 @@ public final class VideoNoteTextureManager implements AutoCloseable {
                 image.close();
                 throw new IllegalArgumentException("video frame dimensions do not match video");
             }
+            applyCircularAlphaMask(image);
             texture = new DynamicTexture(image);
             textureManager.register(TEXTURE_ID, texture);
             uploadedHash = hash;
@@ -70,6 +70,26 @@ public final class VideoNoteTextureManager implements AutoCloseable {
     @Override
     public void close() {
         clear();
+    }
+
+    private static void applyCircularAlphaMask(NativeImage image) {
+        int width = image.getWidth();
+        int height = image.getHeight();
+        float radius = Math.min(width, height) * 0.5f;
+        float centerX = (width - 1) * 0.5f;
+        float centerY = (height - 1) * 0.5f;
+        float radiusSquared = radius * radius;
+
+        for (int y = 0; y < height; y++) {
+            float dy = y - centerY;
+            for (int x = 0; x < width; x++) {
+                float dx = x - centerX;
+                if (dx * dx + dy * dy > radiusSquared) {
+                    int rgba = image.getPixelRGBA(x, y);
+                    image.setPixelRGBA(x, y, rgba & 0x00FFFFFF);
+                }
+            }
+        }
     }
 
     private void closeTexture() {
