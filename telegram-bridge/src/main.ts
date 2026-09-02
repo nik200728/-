@@ -1,0 +1,228 @@
+import crypto from "node:crypto";
+import fs from "node:fs";
+import http from "node:http";
+import path from "node:path";
+
+const PORT = Number(process.env.PORT ?? 8080);
+const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN ?? "";
+const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? "";
+const TELEGRAM_POLL_MS = Number(process.env.TELEGRAM_POLL_MS ?? 1500);
+const DATA_FILE = process.env.BRIDGE_DATA_FILE ?? path.resolve(process.cwd(), "data", "state.json");
+
+if (BRIDGE_TOKEN.length < 32) throw new Error("BRIDGE_TOKEN must contain at least 32 characters");
+if (!TELEGRAM_BOT_TOKEN) console.warn("TELEGRAM_BOT_TOKEN is not configured; Telegram polling is disabled");
+
+type LinkCode = { minecraftUuid: string; code: string; expiresAt: number };
+type Binding = { minecraftUuid: string; telegramUserId: string; chatId: string };
+type InboxMessage = { messageId: string; minecraftUuid: string; telegramUserId: string; chatId: string; durationMs: number; audioBase64: string; createdAt: number };
+type OutboundVoice = { minecraftUuid: string; messageId: string; telegramMessageId: number | null; createdAt: number };
+type PersistedState = { links: LinkCode[]; bindings: Binding[]; inbox: InboxMessage[]; outboundVoices?: OutboundVoice[]; telegramOffset: number };
+
+const links = new Map<string, LinkCode>();
+const bindings = new Map<string, Binding>();
+const inbox = new Map<string, InboxMessage[]>();
+const outboundVoices = new Map<string, OutboundVoice>();
+let telegramOffset = 0;
+let telegramPolling = false;
+let stateWriteScheduled = false;
+
+function loadState() {
+  try {
+    const state = JSON.parse(fs.readFileSync(DATA_FILE, "utf8")) as Partial<PersistedState>;
+    for (const link of state.links ?? []) if (typeof link.code === "string" && typeof link.minecraftUuid === "string" && link.expiresAt > Date.now()) links.set(link.code, link);
+    for (const binding of state.bindings ?? []) if (binding.minecraftUuid && binding.telegramUserId && binding.chatId) bindings.set(binding.minecraftUuid, binding);
+    for (const message of state.inbox ?? []) {
+      if (!message.minecraftUuid || !message.messageId || !message.audioBase64) continue;
+      const queue = inbox.get(message.minecraftUuid) ?? [];
+      queue.push(message);
+      if (queue.length <= 100) inbox.set(message.minecraftUuid, queue);
+    }
+    for (const voice of state.outboundVoices ?? []) {
+      if (!voice.minecraftUuid || !voice.messageId) continue;
+      outboundVoices.set(voice.messageId, voice);
+    }
+    telegramOffset = Math.max(0, Number(state.telegramOffset ?? 0));
+    console.log(`Loaded bridge state: ${bindings.size} link(s), ${[...inbox.values()].reduce((n, q) => n + q.length, 0)} queued message(s), ${outboundVoices.size} outbound voice(s)`);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.warn("Could not load bridge state:", error);
+  }
+}
+
+function snapshotState(): PersistedState { return { links: [...links.values()], bindings: [...bindings.values()], inbox: [...inbox.values()].flat(), outboundVoices: [...outboundVoices.values()], telegramOffset }; }
+function persistState() {
+  fs.mkdirSync(path.dirname(DATA_FILE), { recursive: true });
+  const temp = `${DATA_FILE}.tmp`;
+  fs.writeFileSync(temp, JSON.stringify(snapshotState()), { encoding: "utf8", mode: 0o600 });
+  fs.renameSync(temp, DATA_FILE);
+}
+function schedulePersist() {
+  if (stateWriteScheduled) return;
+  stateWriteScheduled = true;
+  setImmediate(() => { stateWriteScheduled = false; try { persistState(); } catch (error) { console.error("Could not persist bridge state:", error); } });
+}
+function authorized(req: http.IncomingMessage): boolean {
+  const value = req.headers.authorization ?? "";
+  if (!value.startsWith("Bearer ")) return false;
+  const supplied = Buffer.from(value.slice(7));
+  const expected = Buffer.from(BRIDGE_TOKEN);
+  return supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
+}
+function json(res: http.ServerResponse, status: number, body: unknown) { res.writeHead(status, { "content-type": "application/json; charset=utf-8" }); res.end(JSON.stringify(body)); }
+function readBody(req: http.IncomingMessage): Promise<any> {
+  return new Promise((resolve, reject) => {
+    let body = ""; let size = 0;
+    req.on("data", chunk => { size += Buffer.byteLength(chunk); if (size > 8 * 1024 * 1024) { reject(new Error("request too large")); req.destroy(); return; } body += chunk; });
+    req.on("end", () => { try { resolve(body ? JSON.parse(body) : {}); } catch { reject(new Error("invalid json")); } });
+    req.on("error", reject);
+  });
+}
+function createLinkCode(minecraftUuid: string): LinkCode {
+  for (let attempt = 0; attempt < 10; attempt++) {
+    const code = String(crypto.randomInt(100000, 1000000));
+    if (links.has(code)) continue;
+    const link = { minecraftUuid, code, expiresAt: Date.now() + 5 * 60_000 };
+    links.set(code, link); schedulePersist(); return link;
+  }
+  throw new Error("could_not_create_link_code");
+}
+async function telegram(method: string, init?: RequestInit) {
+  if (!TELEGRAM_BOT_TOKEN) throw new Error("telegram_not_configured");
+  const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/${method}`, init);
+  const payload = await response.json() as { ok?: boolean; result?: any; description?: string };
+  if (!response.ok || !payload.ok) throw new Error(`telegram_${method}_failed:${payload.description ?? response.status}`);
+  return payload.result;
+}
+async function sendTelegramText(chatId: string, text: string) {
+  await telegram("sendMessage", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ chat_id: chatId, text }) });
+}
+async function sendTelegramVoice(chatId: string, audio: Buffer, durationMs: number, messageId: string) {
+  if (audio.length > 2 * 1024 * 1024) throw new Error("audio_too_large");
+  if (durationMs < 1 || durationMs > 120_000) throw new Error("invalid_duration");
+  const form = new FormData();
+  form.set("chat_id", chatId);
+  form.set("caption", `Minecraft voice message • ${messageId}`);
+  form.set("voice", new Blob([audio.buffer.slice(audio.byteOffset, audio.byteOffset + audio.byteLength) as ArrayBuffer], { type: "audio/ogg" }), `${messageId}.ogg`);
+  const result = await telegram("sendVoice", { method: "POST", body: form });
+  return result?.message_id ?? null;
+}
+function enqueue(message: InboxMessage) {
+  const queue = inbox.get(message.minecraftUuid) ?? [];
+  queue.push(message); while (queue.length > 100) queue.shift(); inbox.set(message.minecraftUuid, queue); schedulePersist();
+}
+async function handleTelegramVoice(message: any) {
+  const chatId = String(message.chat?.id ?? "");
+  const telegramUserId = String(message.from?.id ?? "");
+  const binding = [...bindings.values()].find(item => item.chatId === chatId);
+  if (!binding) { if (chatId) await sendTelegramText(chatId, "Этот чат не привязан к Minecraft. В игре создайте код через /tglink."); return; }
+  const voice = message.voice; if (!voice?.file_id) return;
+  const durationSeconds = Number(voice.duration ?? 0);
+  if (durationSeconds < 1 || durationSeconds > 120) { await sendTelegramText(chatId, "Голосовое сообщение должно быть длительностью от 1 до 120 секунд."); return; }
+  const file = await telegram("getFile", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ file_id: voice.file_id }) });
+  const filePath = file?.file_path as string | undefined; if (!filePath) throw new Error("telegram_file_path_missing");
+  const response = await fetch(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${filePath}`);
+  if (!response.ok) throw new Error(`telegram_file_download_failed:${response.status}`);
+  const audio = Buffer.from(await response.arrayBuffer());
+  if (audio.length === 0 || audio.length > 2 * 1024 * 1024) throw new Error("inbound_audio_too_large");
+  enqueue({ messageId: `tg-${message.message_id}-${crypto.randomUUID()}`, minecraftUuid: binding.minecraftUuid, telegramUserId, chatId, durationMs: Math.round(durationSeconds * 1000), audioBase64: audio.toString("base64"), createdAt: Date.now() });
+}
+async function pollTelegram() {
+  if (telegramPolling || !TELEGRAM_BOT_TOKEN) return;
+  telegramPolling = true;
+  try {
+    const updates = await telegram("getUpdates", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ offset: telegramOffset, timeout: 20, allowed_updates: ["message"] }), signal: AbortSignal.timeout(30_000) });
+    for (const update of updates as any[]) {
+      telegramOffset = Math.max(telegramOffset, Number(update.update_id) + 1); schedulePersist();
+      const message = update.message; if (!message) continue;
+      const chatId = String(message.chat?.id ?? ""); const fromId = String(message.from?.id ?? "");
+      const text = typeof message.text === "string" ? message.text.trim() : "";
+      const match = text.match(/^\/link(?:@[^ ]+)?\s+(\d{6})$/i);
+      if (match) {
+        const link = links.get(match[1]);
+        if (!link || link.expiresAt < Date.now()) await sendTelegramText(chatId, "Код недействителен или уже истёк.");
+        else { links.delete(link.code); bindings.set(link.minecraftUuid, { minecraftUuid: link.minecraftUuid, telegramUserId: fromId, chatId }); schedulePersist(); await sendTelegramText(chatId, "Готово. Minecraft и Telegram связаны."); }
+        continue;
+      }
+      if (/^\/unlink(?:@[^ ]+)?$/i.test(text)) {
+        const binding = [...bindings.values()].find(item => item.chatId === chatId && item.telegramUserId === fromId);
+        if (binding) { bindings.delete(binding.minecraftUuid); inbox.delete(binding.minecraftUuid); schedulePersist(); await sendTelegramText(chatId, "Связь с Minecraft удалена."); }
+        else await sendTelegramText(chatId, "Активной связи не найдено.");
+        continue;
+      }
+      if (/^\/status(?:@[^ ]+)?$/i.test(text)) {
+        const binding = [...bindings.values()].find(item => item.chatId === chatId && item.telegramUserId === fromId);
+        await sendTelegramText(chatId, binding ? "Minecraft и Telegram связаны." : "Minecraft и Telegram не связаны.");
+        continue;
+      }
+      if (message.voice) await handleTelegramVoice(message);
+    }
+  } catch (error) { console.error("Telegram polling:", error instanceof Error ? error.message : error); }
+  finally { telegramPolling = false; }
+}
+
+loadState();
+const server = http.createServer(async (req, res) => {
+  try {
+    if (req.method === "GET" && req.url === "/health") return json(res, 200, { ok: true, telegram: Boolean(TELEGRAM_BOT_TOKEN) });
+    if (!authorized(req)) return json(res, 401, { error: "unauthorized" });
+
+    if (req.method === "POST" && req.url === "/v1/link/code") {
+      const body = await readBody(req); if (typeof body.minecraftUuid !== "string") return json(res, 400, { error: "minecraftUuid required" });
+      const link = createLinkCode(body.minecraftUuid); return json(res, 200, { code: link.code, expiresAt: link.expiresAt });
+    }
+    if (req.method === "POST" && req.url === "/v1/link/consume") {
+      const body = await readBody(req); const link = links.get(String(body.code));
+      if (!link || link.expiresAt < Date.now()) return json(res, 400, { error: "invalid_or_expired_code" });
+      if (typeof body.telegramUserId !== "string" || typeof body.chatId !== "string") return json(res, 400, { error: "telegramUserId and chatId required" });
+      links.delete(link.code); bindings.set(link.minecraftUuid, { minecraftUuid: link.minecraftUuid, telegramUserId: body.telegramUserId, chatId: body.chatId }); schedulePersist();
+      return json(res, 200, { minecraftUuid: link.minecraftUuid, linked: true });
+    }
+    if (req.method === "POST" && req.url === "/v1/link/unlink") {
+      const body = await readBody(req); if (typeof body.minecraftUuid !== "string") return json(res, 400, { error: "minecraftUuid required" });
+      const removed = bindings.delete(body.minecraftUuid); if (removed) inbox.delete(body.minecraftUuid); schedulePersist();
+      return json(res, 200, { minecraftUuid: body.minecraftUuid, unlinked: removed });
+    }
+    if (req.method === "POST" && req.url === "/v1/messages") {
+      const body = await readBody(req);
+      if (typeof body.messageId !== "string" || typeof body.audioBase64 !== "string" || typeof body.minecraftUuid !== "string") return json(res, 400, { error: "messageId, minecraftUuid and audioBase64 required" });
+      const binding = bindings.get(body.minecraftUuid); if (!binding) return json(res, 409, { error: "minecraft_not_linked" });
+      const existing = outboundVoices.get(body.messageId);
+      if (existing) {
+        if (existing.minecraftUuid !== body.minecraftUuid) return json(res, 409, { error: "message_id_conflict" });
+        return json(res, 200, { accepted: true, messageId: existing.messageId, telegramMessageId: existing.telegramMessageId, duplicate: true });
+      }
+      const audio = Buffer.from(body.audioBase64, "base64"); if (audio.length === 0 || audio.length > 2 * 1024 * 1024) return json(res, 413, { error: "audio_too_large" });
+      const durationMs = Number(body.durationMs); const telegramMessageId = await sendTelegramVoice(binding.chatId, audio, durationMs, body.messageId);
+      outboundVoices.set(body.messageId, { minecraftUuid: body.minecraftUuid, messageId: body.messageId, telegramMessageId: telegramMessageId === null ? null : Number(telegramMessageId), createdAt: Date.now() });
+      schedulePersist();
+      return json(res, 200, { accepted: true, messageId: body.messageId, telegramMessageId });
+    }
+    if (req.method === "POST" && req.url === "/v1/chat") {
+      const body = await readBody(req);
+      if (typeof body.minecraftUuid !== "string" || typeof body.text !== "string") return json(res, 400, { error: "minecraftUuid and text required" });
+      const text = body.text.trim(); if (!text) return json(res, 400, { error: "text required" });
+      if (text.length > 4096) return json(res, 413, { error: "text_too_long" });
+      const binding = bindings.get(body.minecraftUuid); if (!binding) return json(res, 409, { error: "minecraft_not_linked" });
+      await sendTelegramText(binding.chatId, `Minecraft: ${text}`);
+      return json(res, 200, { accepted: true });
+    }
+    if (req.method === "GET" && req.url?.startsWith("/v1/inbox?")) {
+      const uuid = new URL(req.url, `http://${req.headers.host ?? "localhost"}`).searchParams.get("minecraftUuid"); if (!uuid) return json(res, 400, { error: "minecraftUuid required" });
+      return json(res, 200, { messages: inbox.get(uuid) ?? [] });
+    }
+    if (req.method === "POST" && req.url === "/v1/inbox/ack") {
+      const body = await readBody(req);
+      if (typeof body.minecraftUuid !== "string" || typeof body.messageId !== "string") return json(res, 400, { error: "minecraftUuid and messageId required" });
+      const binding = bindings.get(body.minecraftUuid); if (!binding) return json(res, 409, { error: "minecraft_not_linked" });
+      const queue = inbox.get(body.minecraftUuid) ?? []; const next = queue.filter(message => message.messageId !== body.messageId); const removed = next.length !== queue.length;
+      if (removed) { if (next.length === 0) inbox.delete(body.minecraftUuid); else inbox.set(body.minecraftUuid, next); schedulePersist(); }
+      return json(res, 200, { acknowledged: removed, messageId: body.messageId });
+    }
+    if (req.method === "GET" && req.url?.startsWith("/v1/link/status?")) {
+      const uuid = new URL(req.url, `http://${req.headers.host ?? "localhost"}`).searchParams.get("minecraftUuid"); const binding = uuid ? bindings.get(uuid) : undefined;
+      return json(res, 200, { linked: Boolean(binding), telegramUserId: binding?.telegramUserId ?? null });
+    }
+    return json(res, 404, { error: "not_found" });
+  } catch (error) { console.error(error instanceof Error ? error.message : error); return json(res, 500, { error: "internal_error" }); }
+});
+server.listen(PORT, () => console.log(`Telegram bridge listening on :${PORT}`));
+if (TELEGRAM_BOT_TOKEN) { void pollTelegram(); setInterval(() => void pollTelegram(), TELEGRAM_POLL_MS); }
