@@ -25,10 +25,19 @@ const MAX_FRAME_BYTES = 512 * 1024;
 type Frame = { timestampMs: number; image: Buffer };
 type Tgv1Video = { width: number; height: number; frameRate: number; durationMs: number; frames: Frame[] };
 
+function decodeBase64(value: string): Buffer {
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value) || value.length % 4 !== 0) {
+    throw new Error("invalid_video_base64");
+  }
+  const video = Buffer.from(value, "base64");
+  if (!video.length || video.toString("base64") !== value) throw new Error("invalid_video_base64");
+  return video;
+}
+
 export function validateVideoInput(body: any) {
   if (typeof body.videoBase64 !== "string") throw new Error("videoBase64 required");
-  const video = Buffer.from(body.videoBase64, "base64");
-  if (!video.length || video.length > MAX_VIDEO_BYTES) throw new Error("video_too_large");
+  const video = decodeBase64(body.videoBase64);
+  if (video.length > MAX_VIDEO_BYTES) throw new Error("video_too_large");
   const durationMs = Number(body.durationMs), width = Number(body.width), height = Number(body.height), frameRate = Number(body.frameRate);
   if (!Number.isInteger(durationMs) || durationMs < 1 || durationMs > MAX_VIDEO_DURATION_MS) throw new Error("invalid_duration");
   if (!Number.isInteger(width) || width < 1 || width > MAX_VIDEO_DIMENSION) throw new Error("invalid_width");
