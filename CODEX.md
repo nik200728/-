@@ -13,6 +13,7 @@ Do not claim a feature is implemented merely because transport models, UI, or ma
 - Voice playback is routed through Plasmo Voice client playback primitives.
 - Minecraft UI/input/configuration exist.
 - Telegram bridge supports linking, outbound voice messages, inbound Telegram voice messages, inbox delivery and acknowledgement.
+- The inbound voice path now requires both the bound chat and bound Telegram user to match.
 - Idempotency exists for the voice HTTP path, but inspect concurrency/race behavior and persistence bounds.
 
 ### Video notes
@@ -25,6 +26,8 @@ Do not claim a feature is implemented merely because transport models, UI, or ma
 - The bridge now converts Minecraft `TGV1` frames to MP4 for Telegram using configurable `ffmpeg`/`ffprobe` executables.
 - The bridge now downloads inbound Telegram `video_note` media, converts MP4 into bounded `TGV1` frames, queues it, and exposes it through the existing inbox endpoint.
 - Minecraft `BridgeHttpClient` now parses both voice and video inbox messages, and the server delivers inbound video notes to the player.
+- Bridge HTTP body handling allows a 12 MiB JSON envelope so an 8 MiB binary video payload can survive base64 expansion.
+- Bridge validation tests now cover accepted bounds, oversized payloads, duration/FPS limits and dimensions.
 - **This is implemented as a bridge path, but must still be verified by an actual build and live Telegram round-trip.**
 
 ## Single-player test matrix
@@ -91,6 +94,7 @@ The mod has both common (`main`) and client entrypoints, so its common server-si
 - The client video tick currently advances by a fixed 50 ms; consider using the actual client tick delta if required for accurate timing.
 - Bridge state is persisted as JSON; inspect growth, atomicity and failure recovery.
 - Bridge HTTP request limits and Telegram media limits must be consistent. The Minecraft video payload is capped at 8 MiB, while its JSON/base64 representation needs a larger HTTP request envelope.
+- `telegram-bridge/src/video.test.ts` uses Node's built-in test runner; the test command requires Node 22+ and does not exercise native ffmpeg/ffprobe conversion.
 
 ## Definition of done
 A feature is complete only when its full path is implemented, compiles, and has been tested as far as the environment permits. If hardware-dependent camera testing cannot be performed, report that explicitly instead of pretending it passed.
