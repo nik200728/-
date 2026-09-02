@@ -40,6 +40,7 @@ public final class VideoNoteScreen extends Screen {
         graphics.fill(left, top, left + PANEL_WIDTH, top + PANEL_HEIGHT, 0xE9141821);
         graphics.fill(left, top, left + PANEL_WIDTH, top + 3, 0xFF4EA1FF);
         graphics.drawString(font, Component.literal("Video notes"), left + 20, top + 18, 0xFFFFFFFF);
+        graphics.drawString(font, Component.literal("ESC"), left + PANEL_WIDTH - 45, top + 18, 0xFF7F8DA0);
 
         if (messages.isEmpty()) {
             graphics.drawCenteredString(font, Component.literal("No video notes"), width / 2, top + 180, 0xFFB9C2CF);
@@ -65,10 +66,17 @@ public final class VideoNoteScreen extends Screen {
         int imageTop = cy - VIDEO_RADIUS;
         Identifier texture = textureManager.upload(state.frame());
 
-        graphics.fill(imageLeft - 5, imageTop - 5, imageLeft + VIDEO_SIZE + 5, imageTop + VIDEO_SIZE + 5, 0xFF303A49);
+        // Circular-looking presentation: dark backing disc + real frame + segmented ring.
+        graphics.fill(imageLeft - 6, imageTop - 6, imageLeft + VIDEO_SIZE + 6, imageTop + VIDEO_SIZE + 6, 0xFF303A49);
         graphics.blit(texture, imageLeft, imageTop, VIDEO_SIZE, VIDEO_SIZE,
                 0, 0, state.width(), state.height(), state.width(), state.height());
         drawProgressRing(graphics, cx, cy, VIDEO_RADIUS + 7, state.progress());
+
+        boolean videoHovered = Math.hypot(mouseX - cx, mouseY - cy) <= VIDEO_RADIUS;
+        if (videoHovered) {
+            graphics.fill(imageLeft, imageTop, imageLeft + VIDEO_SIZE, imageTop + VIDEO_SIZE, 0x40000000);
+            drawPlaybackGlyph(graphics, cx, cy, state.playing());
+        }
 
         graphics.drawCenteredString(font, Component.literal(state.senderName()), cx, top + 248, 0xFFFFFFFF);
         graphics.drawCenteredString(font,
@@ -81,16 +89,41 @@ public final class VideoNoteScreen extends Screen {
         graphics.fill(barLeft, barY, barRight, barY + 4, 0xFF384454);
         graphics.fill(barLeft, barY, barLeft + Math.round((barRight - barLeft) * state.progress()), barY + 4, 0xFF4EA1FF);
 
+        // Navigation controls.
+        drawControl(graphics, left + 68, top + 330, "‹", selectedIndex > 0,
+                mouseX, mouseY);
+        drawControl(graphics, left + PANEL_WIDTH - 68, top + 330, "›", selectedIndex < messages.size() - 1,
+                mouseX, mouseY);
+
         String action = state.playing() ? "Pause" : (state.positionMillis() >= state.durationMillis() ? "Replay" : "Play");
         graphics.drawCenteredString(font, Component.literal(action), cx, top + 323, 0xFFFFFFFF);
-        graphics.drawString(font, Component.literal("←  →  select"), left + 20, top + 350, 0xFF7F8DA0);
-        graphics.drawString(font, Component.literal("J"), left + PANEL_WIDTH - 25, top + 18, 0xFF7F8DA0);
+        graphics.drawCenteredString(font,
+                Component.literal((selectedIndex + 1) + " / " + messages.size()),
+                cx, top + 349, 0xFF7F8DA0);
 
         super.render(graphics, mouseX, mouseY, delta);
     }
 
+    private void drawPlaybackGlyph(GuiGraphics graphics, int cx, int cy, boolean playing) {
+        if (playing) {
+            graphics.fill(cx - 10, cy - 12, cx - 3, cy + 12, 0xFFFFFFFF);
+            graphics.fill(cx + 3, cy - 12, cx + 10, cy + 12, 0xFFFFFFFF);
+            return;
+        }
+        graphics.fill(cx - 7, cy - 13, cx - 2, cy + 13, 0xFFFFFFFF);
+        graphics.fill(cx - 2, cy - 9, cx + 4, cy + 9, 0xFFFFFFFF);
+        graphics.fill(cx + 4, cy - 5, cx + 9, cy + 5, 0xFFFFFFFF);
+    }
+
+    private void drawControl(GuiGraphics graphics, int cx, int cy, String glyph, boolean enabled, int mouseX, int mouseY) {
+        int alpha = enabled ? 0xFF : 0x55;
+        boolean hovered = enabled && Math.hypot(mouseX - cx, mouseY - cy) <= 18;
+        graphics.fill(cx - 18, cy - 15, cx + 18, cy + 15, hovered ? 0xFF344153 : 0xCC202936);
+        graphics.drawCenteredString(font, Component.literal(glyph), cx, cy - 8, (alpha << 24) | 0xFFFFFF);
+    }
+
     private void drawProgressRing(GuiGraphics graphics, int cx, int cy, int radius, float progress) {
-        int segments = 64;
+        int segments = 72;
         int active = Math.round(segments * Math.max(0.0f, Math.min(1.0f, progress)));
         for (int i = 0; i < segments; i++) {
             double angle = -Math.PI / 2.0 + (Math.PI * 2.0 * i / segments);
@@ -126,6 +159,18 @@ public final class VideoNoteScreen extends Screen {
                 float progress = (float) ((mouseX - barLeft) / (double) (barRight - barLeft));
                 playback.seek(Math.round(progress * playback.video().durationMillis()));
                 return true;
+            }
+
+            if (mouseY >= top + 315 && mouseY <= top + 360) {
+                if (mouseX >= left + 45 && mouseX <= left + 95 && selectedIndex > 0) {
+                    selectedIndex--;
+                    return true;
+                }
+                if (mouseX >= left + PANEL_WIDTH - 95 && mouseX <= left + PANEL_WIDTH - 45
+                        && selectedIndex < messages.size() - 1) {
+                    selectedIndex++;
+                    return true;
+                }
             }
         }
         return super.mouseClicked(mouseX, mouseY, button);
