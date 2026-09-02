@@ -20,6 +20,7 @@ public final class BridgeHttpClient {
     private final HttpClient client;
     private final URI endpoint;
     private final URI inboxEndpoint;
+    private final URI inboxAckEndpoint;
     private final String token;
 
     public BridgeHttpClient() {
@@ -28,6 +29,7 @@ public final class BridgeHttpClient {
         String base = url.endsWith("/") ? url.substring(0, url.length() - 1) : url;
         this.endpoint = URI.create(base + "/v1/messages");
         this.inboxEndpoint = URI.create(base + "/v1/inbox");
+        this.inboxAckEndpoint = URI.create(base + "/v1/inbox/ack");
         this.client = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
     }
 
@@ -62,7 +64,7 @@ public final class BridgeHttpClient {
                 });
     }
 
-    /** Atomically drains the Bridge inbox for one linked Minecraft UUID. */
+    /** Reads pending messages without deleting them; callers acknowledge after client delivery. */
     public CompletableFuture<List<InboundVoiceMessage>> pollInbox(UUID minecraftUuid) {
         if (!isConfigured()) {
             return CompletableFuture.failedFuture(new IllegalStateException("Bridge token is not configured"));
@@ -100,6 +102,28 @@ public final class BridgeHttpClient {
                         return CompletableFuture.failedFuture(
                                 new IllegalStateException("Invalid Bridge inbox response", exception));
                     }
+                });
+    }
+
+    /** Acknowledges a message only after Minecraft has accepted it for client delivery. */
+    public CompletableFuture<Void> acknowledgeInbox(UUID minecraftUuid, String messageId) {
+        if (!isConfigured()) {
+            return CompletableFuture.failedFuture(new IllegalStateException("Bridge token is not configured"));
+        }
+        String json = "{\"minecraftUuid\":\"" + minecraftUuid + "\",\"messageId\":\"" + escape(messageId) + "\"}";
+        HttpRequest request = HttpRequest.newBuilder(inboxAckEndpoint)
+                .timeout(Duration.ofSeconds(10))
+                .header("Authorization", "Bearer " + token)
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(json))
+                .build();
+        return client.sendAsync(request, HttpResponse.BodyHandlers.discarding())
+                .thenCompose(response -> {
+                    if (response.statusCode() >= 200 && response.statusCode() < 300) {
+                        return CompletableFuture.completedFuture(null);
+                    }
+                    return CompletableFuture.failedFuture(
+                            new IllegalStateException("Bridge inbox ack returned HTTP " + response.statusCode()));
                 });
     }
 
