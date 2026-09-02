@@ -28,6 +28,7 @@ public final class VideoNoteCaptureController {
     private WebcamCaptureService camera;
     private VideoNoteRecorder recorder;
     private boolean recording;
+    private boolean keyWasDown;
     private boolean registered;
 
     private VideoNoteCaptureController() {}
@@ -39,16 +40,23 @@ public final class VideoNoteCaptureController {
     }
 
     private void tick(Minecraft client) {
+        boolean keyDown = CAPTURE_KEY.isDown();
+
         if (client.screen != null || client.player == null) {
             if (recording) cancel();
+            keyWasDown = keyDown;
             return;
         }
 
-        if (CAPTURE_KEY.isDown()) {
-            if (!recording) start(client);
+        if (keyDown) {
+            // Do not start another recording automatically after the 60-second limit.
+            // The user must release V and press it again.
+            if (!keyWasDown && !recording) start(client);
         } else if (recording) {
             stopAndSend(client);
         }
+
+        keyWasDown = keyDown;
     }
 
     private void start(Minecraft client) {
