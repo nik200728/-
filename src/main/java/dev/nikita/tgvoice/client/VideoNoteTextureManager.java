@@ -25,11 +25,7 @@ public final class VideoNoteTextureManager implements AutoCloseable {
         this.textureManager = Objects.requireNonNull(client.getTextureManager(), "texture manager");
     }
 
-    /**
-     * Decodes and uploads a frame owned by the GPU texture. The alpha mask is
-     * applied before upload so the presentation remains a real circular video
-     * note rather than a square image with a decorative ring around it.
-     */
+    /** Decodes and uploads a frame owned by the GPU texture. */
     public Identifier upload(byte[] encodedImage, int expectedWidth, int expectedHeight) {
         if (encodedImage == null || encodedImage.length == 0) {
             throw new IllegalArgumentException("encoded image is required");
@@ -52,7 +48,7 @@ public final class VideoNoteTextureManager implements AutoCloseable {
                 throw new IllegalArgumentException("video frame dimensions do not match video");
             }
             applyCircularAlphaMask(image);
-            texture = new DynamicTexture(image);
+            texture = new DynamicTexture(() -> "tgvoice-video-note", image);
             textureManager.register(TEXTURE_ID, texture);
             uploadedHash = hash;
             uploadedWidth = expectedWidth;
@@ -63,14 +59,10 @@ public final class VideoNoteTextureManager implements AutoCloseable {
         }
     }
 
-    public void clear() {
-        closeTexture();
-    }
+    public void clear() { closeTexture(); }
 
     @Override
-    public void close() {
-        clear();
-    }
+    public void close() { clear(); }
 
     private static void applyCircularAlphaMask(NativeImage image) {
         int width = image.getWidth();
@@ -85,8 +77,8 @@ public final class VideoNoteTextureManager implements AutoCloseable {
             for (int x = 0; x < width; x++) {
                 float dx = x - centerX;
                 if (dx * dx + dy * dy > radiusSquared) {
-                    int rgba = image.getPixelRGBA(x, y);
-                    image.setPixelRGBA(x, y, rgba & 0x00FFFFFF);
+                    int rgba = image.getPixel(x, y);
+                    image.setPixel(x, y, rgba & 0x00FFFFFF);
                 }
             }
         }
