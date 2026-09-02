@@ -20,6 +20,7 @@ public final class VoiceMessagePlayback {
     private static final int SAMPLE_RATE = 48_000;
     private static final int FRAME_MILLIS = 20;
     private static final long FRAME_NANOS = FRAME_MILLIS * 1_000_000L;
+    private static final long SOURCE_DRAIN_GRACE_NANOS = 500_000_000L;
     private static final int MAX_OGG_BYTES = 2 * 1024 * 1024;
 
     public enum State { STOPPED, PLAYING, PAUSED }
@@ -31,6 +32,7 @@ public final class VoiceMessagePlayback {
     private long positionMillis;
     private long durationMillis;
     private long lastPumpNanos;
+    private long drainDeadlineNanos;
     private boolean pendingPlay;
     private LoopbackSource source;
     private List<short[]> decodedFrames = List.of();
@@ -94,6 +96,7 @@ public final class VoiceMessagePlayback {
             frameSampleOffset = 0;
             pendingPlay = false;
             lastPumpNanos = 0;
+            drainDeadlineNanos = 0;
             closeSourceLocked();
         }
     }
@@ -115,6 +118,7 @@ public final class VoiceMessagePlayback {
                 frameIndex++;
             }
             positionMillis = target;
+            drainDeadlineNanos = 0;
             if (positionMillis >= durationMillis && durationMillis > 0) {
                 state = State.STOPPED;
                 closeSourceLocked();
@@ -130,8 +134,15 @@ public final class VoiceMessagePlayback {
     /** Called from the client tick to feed PCM according to elapsed wall-clock time. */
     public void tick() {
         synchronized (lock) {
-            if (state != State.PLAYING) return;
             long now = System.nanoTime();
+            if (state == State.STOPPED) {
+                if (drainDeadlineNanos != 0 && now >= drainDeadlineNanos) {
+                    drainDeadlineNanos = 0;
+                    closeSourceLocked();
+                }
+                return;
+            }
+            if (state != State.PLAYING) return;
             if (lastPumpNanos == 0) lastPumpNanos = now;
             long elapsed = Math.max(0, now - lastPumpNanos);
             int framesDue = (int) Math.min(8, elapsed / FRAME_NANOS);
@@ -154,6 +165,7 @@ public final class VoiceMessagePlayback {
     private void startPlaybackLocked() {
         if (decodedFrames.isEmpty() || durationMillis <= 0 || positionMillis >= durationMillis) return;
         ensureSource();
+        drainDeadlineNanos = 0;
         state = State.PLAYING;
         lastPumpNanos = System.nanoTime();
         pumpLocked();
@@ -188,6 +200,8 @@ public final class VoiceMessagePlayback {
                 decodedFrames = List.of();
                 pendingPlay = false;
                 state = State.STOPPED;
+                drainDeadlineNanos = 0;
+                closeSourceLocked();
             }
         } finally {
             if (decoder != null) {
@@ -223,7 +237,7 @@ public final class VoiceMessagePlayback {
         if (frameIndex >= decodedFrames.size()) {
             state = State.STOPPED;
             positionMillis = durationMillis;
-            closeSourceLocked();
+            drainDeadlineNanos = System.nanoTime() + SOURCE_DRAIN_GRACE_NANOS;
             return;
         }
 
@@ -241,7 +255,7 @@ public final class VoiceMessagePlayback {
         if (positionMillis >= durationMillis || frameIndex >= decodedFrames.size()) {
             state = State.STOPPED;
             positionMillis = durationMillis;
-            closeSourceLocked();
+            drainDeadlineNanos = System.nanoTime() + SOURCE_DRAIN_GRACE_NANOS;
         }
     }
 
