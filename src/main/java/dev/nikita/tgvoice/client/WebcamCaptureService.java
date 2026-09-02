@@ -4,6 +4,7 @@ import org.openpnp.capture.CaptureDevice;
 import org.openpnp.capture.CaptureFormat;
 import org.openpnp.capture.CaptureStream;
 import org.openpnp.capture.OpenPnpCapture;
+import org.openpnp.capture.library.CapFormatInfo;
 
 import java.awt.Dimension;
 import java.awt.Graphics2D;
@@ -47,8 +48,9 @@ public final class WebcamCaptureService implements AutoCloseable {
         }
 
         stream = device.openStream(selected);
-        width = selected.getWidth();
-        height = selected.getHeight();
+        CapFormatInfo info = selected.getFormatInfo();
+        width = info.width;
+        height = info.height;
     }
 
     public synchronized boolean isOpen() {
@@ -94,8 +96,9 @@ public final class WebcamCaptureService implements AutoCloseable {
         CaptureFormat best = null;
         long bestScore = Long.MAX_VALUE;
         for (CaptureFormat format : formats) {
-            int w = format.getWidth();
-            int h = format.getHeight();
+            CapFormatInfo info = format.getFormatInfo();
+            int w = info.width;
+            int h = info.height;
             if (w < 1 || h < 1) continue;
             long score = Math.abs((long) w * h - (long) TARGET_SIZE * TARGET_SIZE);
             if (w > TARGET_SIZE || h > TARGET_SIZE) score += 10_000_000L;
