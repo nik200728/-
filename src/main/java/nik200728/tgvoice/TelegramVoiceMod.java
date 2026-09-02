@@ -47,7 +47,6 @@ public final class TelegramVoiceMod implements ModInitializer {
                 return;
             }
 
-            // Never trust identity fields supplied by the client. The server is authoritative.
             VoiceMessagePayload authoritative = new VoiceMessagePayload(
                     payload.messageId(),
                     context.player().getUUID(),
@@ -56,12 +55,10 @@ public final class TelegramVoiceMod implements ModInitializer {
                     payload.opusData(),
                     payload.waveform()
             );
-            context.player().server.execute(() -> {
-                var result = messageRouter.accept(authoritative);
-                if (result.status() == dev.nikita.tgvoice.network.DeliveryResult.Status.FAILED) {
-                    LOGGER.error("Voice Message {} rejected by router: {}", result.messageId(), result.detail());
-                }
-            });
+            var result = messageRouter.accept(authoritative);
+            if (result.status() == dev.nikita.tgvoice.network.DeliveryResult.Status.FAILED) {
+                LOGGER.error("Voice Message {} rejected by router: {}", result.messageId(), result.detail());
+            }
         });
 
         ServerTickEvents.END_SERVER_TICK.register(TelegramVoiceMod::pollTelegramInbox);
