@@ -4,18 +4,28 @@ import http from "node:http";
 const PORT = Number(process.env.PORT ?? 8080);
 const BRIDGE_TOKEN = process.env.BRIDGE_TOKEN ?? "";
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? "";
+const TELEGRAM_POLL_MS = Number(process.env.TELEGRAM_POLL_MS ?? 1500);
 
-if (BRIDGE_TOKEN.length < 32) {
-  throw new Error("BRIDGE_TOKEN must contain at least 32 characters");
-}
-if (!TELEGRAM_BOT_TOKEN) {
-  console.warn("TELEGRAM_BOT_TOKEN is not configured; Telegram delivery is disabled");
-}
+if (BRIDGE_TOKEN.length < 32) throw new Error("BRIDGE_TOKEN must contain at least 32 characters");
+if (!TELEGRAM_BOT_TOKEN) console.warn("TELEGRAM_BOT_TOKEN is not configured; Telegram polling is disabled");
 
 type LinkCode = { minecraftUuid: string; code: string; expiresAt: number };
 type Binding = { minecraftUuid: string; telegramUserId: string; chatId: string };
+type InboxMessage = {
+  messageId: string;
+  minecraftUuid: string;
+  telegramUserId: string;
+  chatId: string;
+  durationMs: number;
+  audioBase64: string;
+  createdAt: number;
+};
+
 const links = new Map<string, LinkCode>();
 const bindings = new Map<string, Binding>();
+const inbox = new Map<string, InboxMessage[]>();
+let telegramOffset = 0;
+let telegramPolling = false;
 
 function authorized(req: http.IncomingMessage): boolean {
   const value = req.headers.authorization ?? "";
@@ -26,9 +36,8 @@ function authorized(req: http.IncomingMessage): boolean {
 }
 
 function json(res: http.ServerResponse, status: number, body: unknown) {
-  const data = JSON.stringify(body);
   res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
-  res.end(data);
+  res.end(JSON.stringify(body));
 }
 
 function readBody(req: http.IncomingMessage): Promise<any> {
@@ -45,8 +54,7 @@ function readBody(req: http.IncomingMessage): Promise<any> {
       body += chunk;
     });
     req.on("end", () => {
-      try { resolve(body ? JSON.parse(body) : {}); }
-      catch { reject(new Error("invalid json")); }
+      try { resolve(body ? JSON.parse(body) : {}); } catch { reject(new Error("invalid json")); }
     });
     req.on("error", reject);
   });
@@ -59,8 +67,23 @@ function createLinkCode(minecraftUuid: string): LinkCode {
   return link;
 }
 
-async function sendTelegramVoice(chatId: string, audio: Buffer, durationMs: number, messageId: string) {
+async function telegram(method: string, init?: RequestInit) {
   if (!TELEGRAM_BOT_TOKEN) throw new Error("telegram_not_configured");
+  const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/${method}`, init);
+  const payload = await response.json() as { ok?: boolean; result?: any; description?: string };
+  if (!response.ok || !payload.ok) throw new Error(`telegram_${method}_failed:${payload.description ?? response.status}`);
+  return payload.result;
+}
+
+async function sendTelegramText(chatId: string, text: string) {
+  await telegram("sendMessage", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ chat_id: chatId, text }),
+  });
+}
+
+async function sendTelegramVoice(chatId: string, audio: Buffer, durationMs: number, messageId: string) {
   if (audio.length > 2 * 1024 * 1024) throw new Error("audio_too_large");
   if (durationMs < 1 || durationMs > 120_000) throw new Error("invalid_duration");
 
@@ -68,21 +91,99 @@ async function sendTelegramVoice(chatId: string, audio: Buffer, durationMs: numb
   form.set("chat_id", chatId);
   form.set("caption", `Minecraft voice message • ${messageId}`);
   form.set("voice", new Blob([audio], { type: "audio/ogg" }), `${messageId}.ogg`);
+  const result = await telegram("sendVoice", { method: "POST", body: form });
+  return result?.message_id ?? null;
+}
 
-  const response = await fetch(`https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendVoice`, {
-    method: "POST",
-    body: form,
-  });
-  const payload = await response.json() as { ok?: boolean; result?: { message_id?: number }; description?: string };
-  if (!response.ok || !payload.ok) {
-    throw new Error(`telegram_send_voice_failed:${payload.description ?? response.status}`);
+function enqueue(message: InboxMessage) {
+  const queue = inbox.get(message.minecraftUuid) ?? [];
+  queue.push(message);
+  while (queue.length > 100) queue.shift();
+  inbox.set(message.minecraftUuid, queue);
+}
+
+async function handleTelegramVoice(message: any) {
+  const chatId = String(message.chat?.id ?? "");
+  const telegramUserId = String(message.from?.id ?? "");
+  const binding = [...bindings.values()].find(item => item.chatId === chatId);
+  if (!binding) {
+    if (chatId) await sendTelegramText(chatId, "Этот чат не привязан к Minecraft. В игре создайте код через /tglink.");
+    return;
   }
-  return payload.result?.message_id ?? null;
+
+  const voice = message.voice;
+  if (!voice?.file_id) return;
+  const durationSeconds = Number(voice.duration ?? 0);
+  if (durationSeconds < 1 || durationSeconds > 120) {
+    await sendTelegramText(chatId, "Голосовое сообщение должно быть длительностью от 1 до 120 секунд.");
+    return;
+  }
+
+  const file = await telegram("getFile", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ file_id: voice.file_id }),
+  });
+  const filePath = file?.file_path as string | undefined;
+  if (!filePath) throw new Error("telegram_file_path_missing");
+
+  const response = await fetch(`https://api.telegram.org/file/bot${TELEGRAM_BOT_TOKEN}/${filePath}`);
+  if (!response.ok) throw new Error(`telegram_file_download_failed:${response.status}`);
+  const audio = Buffer.from(await response.arrayBuffer());
+  if (audio.length === 0 || audio.length > 2 * 1024 * 1024) throw new Error("inbound_audio_too_large");
+
+  enqueue({
+    messageId: `tg-${message.message_id}-${crypto.randomUUID()}`,
+    minecraftUuid: binding.minecraftUuid,
+    telegramUserId,
+    chatId,
+    durationMs: Math.round(durationSeconds * 1000),
+    audioBase64: audio.toString("base64"),
+    createdAt: Date.now(),
+  });
+}
+
+async function pollTelegram() {
+  if (telegramPolling || !TELEGRAM_BOT_TOKEN) return;
+  telegramPolling = true;
+  try {
+    const updates = await telegram("getUpdates", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ offset: telegramOffset, timeout: 20, allowed_updates: ["message"] }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    for (const update of updates as any[]) {
+      telegramOffset = Math.max(telegramOffset, Number(update.update_id) + 1);
+      const message = update.message;
+      if (!message) continue;
+      const chatId = String(message.chat?.id ?? "");
+      const fromId = String(message.from?.id ?? "");
+      const text = typeof message.text === "string" ? message.text.trim() : "";
+      const match = text.match(/^\/link(?:@[^ ]+)?\s+(\d{6})$/i);
+      if (match) {
+        const link = links.get(match[1]);
+        if (!link || link.expiresAt < Date.now()) {
+          await sendTelegramText(chatId, "Код недействителен или уже истёк.");
+        } else {
+          links.delete(link.code);
+          bindings.set(link.minecraftUuid, { minecraftUuid: link.minecraftUuid, telegramUserId: fromId, chatId });
+          await sendTelegramText(chatId, "Готово. Minecraft и Telegram связаны.");
+        }
+        continue;
+      }
+      if (message.voice) await handleTelegramVoice(message);
+    }
+  } catch (error) {
+    console.error("Telegram polling:", error instanceof Error ? error.message : error);
+  } finally {
+    telegramPolling = false;
+  }
 }
 
 const server = http.createServer(async (req, res) => {
   try {
-    if (req.method === "GET" && req.url === "/health") return json(res, 200, { ok: true });
+    if (req.method === "GET" && req.url === "/health") return json(res, 200, { ok: true, telegram: Boolean(TELEGRAM_BOT_TOKEN) });
     if (!authorized(req)) return json(res, 401, { error: "unauthorized" });
 
     if (req.method === "POST" && req.url === "/v1/link/code") {
@@ -96,42 +197,32 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const link = links.get(String(body.code));
       if (!link || link.expiresAt < Date.now()) return json(res, 400, { error: "invalid_or_expired_code" });
-      if (typeof body.telegramUserId !== "string" || typeof body.chatId !== "string") {
-        return json(res, 400, { error: "telegramUserId and chatId required" });
-      }
+      if (typeof body.telegramUserId !== "string" || typeof body.chatId !== "string") return json(res, 400, { error: "telegramUserId and chatId required" });
       links.delete(link.code);
-      bindings.set(link.minecraftUuid, {
-        minecraftUuid: link.minecraftUuid,
-        telegramUserId: body.telegramUserId,
-        chatId: body.chatId,
-      });
+      bindings.set(link.minecraftUuid, { minecraftUuid: link.minecraftUuid, telegramUserId: body.telegramUserId, chatId: body.chatId });
       return json(res, 200, { minecraftUuid: link.minecraftUuid, linked: true });
     }
 
     if (req.method === "POST" && req.url === "/v1/messages") {
       const body = await readBody(req);
-      if (typeof body.messageId !== "string" || typeof body.audioBase64 !== "string") {
-        return json(res, 400, { error: "messageId and audioBase64 required" });
+      if (typeof body.messageId !== "string" || typeof body.audioBase64 !== "string" || typeof body.minecraftUuid !== "string") {
+        return json(res, 400, { error: "messageId, minecraftUuid and audioBase64 required" });
       }
-      if (typeof body.minecraftUuid !== "string") return json(res, 400, { error: "minecraftUuid required" });
-
       const binding = bindings.get(body.minecraftUuid);
       if (!binding) return json(res, 409, { error: "minecraft_not_linked" });
-
-      let audio: Buffer;
-      try { audio = Buffer.from(body.audioBase64, "base64"); }
-      catch { return json(res, 400, { error: "invalid_audio_base64" }); }
-      if (audio.length === 0 || audio.length > 2 * 1024 * 1024) {
-        return json(res, 413, { error: "audio_too_large" });
-      }
-
+      const audio = Buffer.from(body.audioBase64, "base64");
+      if (audio.length === 0 || audio.length > 2 * 1024 * 1024) return json(res, 413, { error: "audio_too_large" });
       const durationMs = Number(body.durationMs);
       const telegramMessageId = await sendTelegramVoice(binding.chatId, audio, durationMs, body.messageId);
-      return json(res, 200, {
-        accepted: true,
-        messageId: body.messageId,
-        telegramMessageId,
-      });
+      return json(res, 200, { accepted: true, messageId: body.messageId, telegramMessageId });
+    }
+
+    if (req.method === "GET" && req.url?.startsWith("/v1/inbox?")) {
+      const uuid = new URL(req.url, `http://${req.headers.host ?? "localhost"}`).searchParams.get("minecraftUuid");
+      if (!uuid) return json(res, 400, { error: "minecraftUuid required" });
+      const messages = inbox.get(uuid) ?? [];
+      inbox.delete(uuid);
+      return json(res, 200, { messages });
     }
 
     if (req.method === "GET" && req.url?.startsWith("/v1/link/status?")) {
@@ -148,3 +239,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, () => console.log(`Telegram bridge listening on :${PORT}`));
+if (TELEGRAM_BOT_TOKEN) {
+  void pollTelegram();
+  setInterval(() => void pollTelegram(), TELEGRAM_POLL_MS);
+}
