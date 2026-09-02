@@ -39,6 +39,12 @@ public final class VideoNoteCaptureController {
         ClientTickEvents.END_CLIENT_TICK.register(INSTANCE::tick);
     }
 
+    /** Stops an active recording during client shutdown so the camera is released. */
+    public static void shutdown() {
+        INSTANCE.cancel();
+        INSTANCE.keyWasDown = false;
+    }
+
     private void tick(Minecraft client) {
         boolean keyDown = CAPTURE_KEY.isDown();
 
