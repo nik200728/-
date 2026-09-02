@@ -55,8 +55,6 @@ public final class VideoNoteCaptureController {
         }
 
         if (keyDown) {
-            // Do not start another recording automatically after the 60-second limit.
-            // The user must release V and press it again.
             if (!keyWasDown && !recording) start(client);
         } else if (recording) {
             stopAndSend(client);
@@ -71,10 +69,10 @@ public final class VideoNoteCaptureController {
             recorder = new VideoNoteRecorder(camera);
             recorder.start();
             recording = true;
-            client.player.displayClientMessage(Component.literal("Video note recording… release V to send"), true);
+            showMessage(client, "Video note recording… release V to send");
         } catch (Exception exception) {
             closeRecorder();
-            client.player.displayClientMessage(Component.literal("Webcam unavailable: " + safeMessage(exception)), true);
+            showMessage(client, "Webcam unavailable: " + safeMessage(exception));
         }
     }
 
@@ -88,14 +86,12 @@ public final class VideoNoteCaptureController {
 
             String failure = current.failure();
             if (failure == null || failure.isBlank()) {
-                client.player.displayClientMessage(Component.literal("Video note sent"), true);
+                showMessage(client, "Video note sent");
             } else {
-                client.player.displayClientMessage(
-                        Component.literal("Video note sent (capture stopped: " + failure + ")"), true
-                );
+                showMessage(client, "Video note sent (capture stopped: " + failure + ")");
             }
         } catch (Exception exception) {
-            client.player.displayClientMessage(Component.literal("Video note failed: " + safeMessage(exception)), true);
+            showMessage(client, "Video note failed: " + safeMessage(exception));
         } finally {
             closeRecorder();
         }
@@ -115,6 +111,10 @@ public final class VideoNoteCaptureController {
             camera.close();
         }
         camera = null;
+    }
+
+    private static void showMessage(Minecraft client, String message) {
+        client.gui.setOverlayMessage(Component.literal(message), false);
     }
 
     private static String safeMessage(Exception exception) {
