@@ -242,15 +242,19 @@ public final class VoiceMessagePlayback {
         }
 
         short[] frame = decodedFrames.get(frameIndex);
-        if (frameSampleOffset == 0) {
+        int offset = frameSampleOffset;
+        int writtenSamples = frame.length - offset;
+        if (offset == 0) {
             source.write(frame);
         } else {
-            source.write(Arrays.copyOfRange(frame, frameSampleOffset, frame.length));
+            source.write(Arrays.copyOfRange(frame, offset, frame.length));
             frameSampleOffset = 0;
         }
 
-        int writtenSamples = frame.length;
         frameIndex++;
+        // positionMillis already represents the seek target when this is the first
+        // partial frame. Count only the samples actually written so seeking into a
+        // frame cannot jump ahead by the full frame duration.
         positionMillis = Math.min(durationMillis, positionMillis + writtenSamples * 1000L / SAMPLE_RATE);
         if (positionMillis >= durationMillis || frameIndex >= decodedFrames.size()) {
             state = State.STOPPED;
