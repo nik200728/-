@@ -25,10 +25,18 @@ public record VoiceMessagePayload(
     public static final CustomPacketPayload.Type<VoiceMessagePayload> TYPE =
             new CustomPacketPayload.Type<>(Identifier.fromNamespaceAndPath("tgvoice", "voice_message"));
 
+    private static final StreamCodec<RegistryFriendlyByteBuf, UUID> UUID_CODEC = StreamCodec.of(
+            (buf, uuid) -> {
+                buf.writeLong(uuid.getMostSignificantBits());
+                buf.writeLong(uuid.getLeastSignificantBits());
+            },
+            buf -> new UUID(buf.readLong(), buf.readLong())
+    );
+
     public static final StreamCodec<RegistryFriendlyByteBuf, VoiceMessagePayload> CODEC = StreamCodec.composite(
             ByteBufCodecs.STRING_UTF8,
             VoiceMessagePayload::messageId,
-            ByteBufCodecs.UUID,
+            UUID_CODEC,
             VoiceMessagePayload::senderUuid,
             ByteBufCodecs.STRING_UTF8,
             VoiceMessagePayload::senderName,
