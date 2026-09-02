@@ -17,6 +17,13 @@ test("accepts a bounded video payload", () => {
   assert.equal(result.video.length, 9);
 });
 
+test("rejects malformed base64 video payloads", () => {
+  const base = { durationMs: 1000, width: 512, height: 512, frameRate: 30 };
+  for (const videoBase64 of ["not-base64", "YQ", "YQ===", "YQ==junk", "AA==AA=="]) {
+    assert.throws(() => validateVideoInput({ ...base, videoBase64 }), /invalid_video_base64/);
+  }
+});
+
 test("rejects oversized payloads", () => {
   const oversized = Buffer.alloc(MAX_VIDEO_BYTES + 1).toString("base64");
   assert.throws(() => validateVideoInput({
