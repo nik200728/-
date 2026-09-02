@@ -29,7 +29,8 @@ public final class VoiceMessageScreen extends Screen {
         rebuildWidgets();
     }
 
-    private void rebuildWidgets() {
+    @Override
+    protected void rebuildWidgets() {
         clearWidgets();
         messageIds = VoiceMessagePlaybackManager.messageIds();
         listLeft = (width - CARD_WIDTH) / 2;
