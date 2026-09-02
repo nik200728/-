@@ -21,6 +21,7 @@ import javax.imageio.ImageIO;
  */
 public final class WebcamCaptureService implements AutoCloseable {
     public static final int TARGET_SIZE = 512;
+    private static final int TARGET_FPS = 15;
     private static final String JPEG_FORMAT = "jpg";
 
     private final OpenPnpCapture capture;
@@ -32,7 +33,7 @@ public final class WebcamCaptureService implements AutoCloseable {
         capture = new OpenPnpCapture();
     }
 
-    /** Opens the first available camera and a format no larger than 512x512 when possible. */
+    /** Opens the first available camera using a format suitable for 15 FPS capture. */
     public synchronized void open() throws Exception {
         if (stream != null) return;
 
@@ -99,9 +100,21 @@ public final class WebcamCaptureService implements AutoCloseable {
             CapFormatInfo info = format.getFormatInfo();
             int w = info.width;
             int h = info.height;
-            if (w < 1 || h < 1) continue;
+            int fps = info.fps;
+            if (w < 1 || h < 1 || fps < 1) continue;
+
             long score = Math.abs((long) w * h - (long) TARGET_SIZE * TARGET_SIZE);
             if (w > TARGET_SIZE || h > TARGET_SIZE) score += 10_000_000L;
+
+            // The recorder consumes frames at 15 FPS. Prefer a mode capable of
+            // sustaining that rate, while still allowing unusual cameras whose
+            // advertised FPS is above the target.
+            if (fps < TARGET_FPS) {
+                score += (long) (TARGET_FPS - fps) * 5_000_000L;
+            } else {
+                score += (long) (fps - TARGET_FPS) * 1_000L;
+            }
+
             if (score < bestScore) {
                 best = format;
                 bestScore = score;
