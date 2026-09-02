@@ -90,7 +90,7 @@ async function sendTelegramVoice(chatId: string, audio: Buffer, durationMs: numb
   const form = new FormData();
   form.set("chat_id", chatId);
   form.set("caption", `Minecraft voice message • ${messageId}`);
-  form.set("voice", new Blob([audio], { type: "audio/ogg" }), `${messageId}.ogg`);
+  form.set("voice", new Blob([audio.buffer.slice(audio.byteOffset, audio.byteOffset + audio.byteLength) as ArrayBuffer], { type: "audio/ogg" }), `${messageId}.ogg`);
   const result = await telegram("sendVoice", { method: "POST", body: form });
   return result?.message_id ?? null;
 }
