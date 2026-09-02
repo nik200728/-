@@ -11,7 +11,6 @@ import java.util.concurrent.CompletableFuture;
 public final class VoiceMessageClient {
     private static final VoiceMessageClient INSTANCE = new VoiceMessageClient();
     private static final long MIN_DURATION_MS = 200L;
-    private static final long MAX_DURATION_MS = VoiceMessagePayload.MAX_DURATION_MILLIS;
 
     private RecordingSession session;
 
@@ -57,7 +56,8 @@ public final class VoiceMessageClient {
     }
 
     public synchronized void enforceMaximumDuration() {
-        if (session != null && session.isActive() && session.durationMillis() >= MAX_DURATION_MS) {
+        long maxDuration = VoiceMessageConfig.get().maxDurationMillis();
+        if (session != null && session.isActive() && session.durationMillis() >= maxDuration) {
             finishRecording();
         }
     }
@@ -71,7 +71,7 @@ public final class VoiceMessageClient {
 
         UUID senderUuid = minecraft.player.getUUID();
         String senderName = minecraft.player.getGameProfile().name();
-        long duration = Math.min(MAX_DURATION_MS, recording.durationMillis());
+        long duration = Math.min(VoiceMessagePayload.MAX_DURATION_MILLIS, recording.durationMillis());
         byte[] waveform = encodeWaveform(recording.waveform());
 
         CompletableFuture
