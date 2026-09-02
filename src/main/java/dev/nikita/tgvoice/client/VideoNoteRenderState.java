@@ -1,16 +1,10 @@
 package dev.nikita.tgvoice.client;
 
+import com.mojang.blaze3d.platform.NativeImage;
 import dev.nikita.tgvoice.network.VideoNoteContainer;
 import dev.nikita.tgvoice.network.VideoNotePayload;
 
-import java.awt.image.BufferedImage;
-
-/**
- * Immutable render snapshot for one video note.
- *
- * The Minecraft GUI renderer can consume this object without touching the
- * playback manager while it is being updated from the client tick thread.
- */
+/** Immutable render snapshot for one video note. */
 public record VideoNoteRenderState(
         String messageId,
         String senderName,
@@ -20,7 +14,7 @@ public record VideoNoteRenderState(
         long durationMillis,
         float progress,
         boolean playing,
-        BufferedImage frame
+        NativeImage frame
 ) {
     public VideoNoteRenderState {
         if (messageId == null || messageId.isBlank()) throw new IllegalArgumentException("messageId is required");
@@ -45,18 +39,11 @@ public record VideoNoteRenderState(
         long position = playback.positionMillis();
         long duration = video.durationMillis();
         float progress = duration <= 0 ? 0.0f : Math.min(1.0f, Math.max(0.0f, (float) position / (float) duration));
-        BufferedImage frame = cache.get(playback.currentFrame(), video.width(), video.height());
+        NativeImage frame = cache.get(playback.currentFrame(), video.width(), video.height());
 
         return new VideoNoteRenderState(
-                payload.messageId(),
-                payload.senderName(),
-                video.width(),
-                video.height(),
-                position,
-                duration,
-                progress,
-                playback.isPlaying(),
-                frame
+                payload.messageId(), payload.senderName(), video.width(), video.height(),
+                position, duration, progress, playback.isPlaying(), frame
         );
     }
 }
