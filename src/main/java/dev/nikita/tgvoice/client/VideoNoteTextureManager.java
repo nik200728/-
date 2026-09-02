@@ -6,13 +6,12 @@ import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.client.renderer.texture.TextureManager;
 import net.minecraft.resources.Identifier;
 
-import java.io.IOException;
 import java.util.Objects;
 
 /**
  * Owns one dynamic GPU texture for the currently rendered video-note frame.
- * Frames stay decoded in the bounded CPU cache; only the selected frame is
- * uploaded to the GPU.
+ * The texture receives its own NativeImage copy so the bounded frame cache
+ * keeps ownership of its decoded image safely across frame changes.
  */
 public final class VideoNoteTextureManager implements AutoCloseable {
     private static final Identifier TEXTURE_ID = Identifier.fromNamespaceAndPath("tgvoice", "video_note_frame");
@@ -30,7 +29,7 @@ public final class VideoNoteTextureManager implements AutoCloseable {
         if (uploadedImage == image && texture != null) return TEXTURE_ID;
 
         closeTexture();
-        texture = new DynamicTexture(image);
+        texture = new DynamicTexture(image.copy());
         uploadedImage = image;
         textureManager.register(TEXTURE_ID, texture);
         return TEXTURE_ID;
