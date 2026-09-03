@@ -22,6 +22,9 @@ public final class VideoNoteScreen extends Screen {
     private final VideoNoteFrameCache frameCache = new VideoNoteFrameCache();
     private final VideoNoteTextureManager textureManager;
     private int selectedIndex;
+    private volatile VideoNoteRenderState preparedState;
+    private volatile Identifier preparedTexture;
+    private volatile boolean preparedStateInvalid;
 
     public VideoNoteScreen() {
         super(Component.translatable("screen.tgvoice.video_notes"));
@@ -31,6 +34,40 @@ public final class VideoNoteScreen extends Screen {
     @Override
     protected void init() {
         selectedIndex = Math.max(0, Math.min(selectedIndex, VideoNoteManager.getInstance().messages().size() - 1));
+        preparedState = null;
+        preparedTexture = null;
+        preparedStateInvalid = false;
+    }
+
+    /**
+     * Prepare decoded frames and GPU textures on the client tick, outside the
+     * deferred GUI extraction pass used by Minecraft 26.1.
+     */
+    @Override
+    public void tick() {
+        super.tick();
+        List<VideoNotePayload> messages = VideoNoteManager.getInstance().messages();
+        if (messages.isEmpty()) {
+            preparedState = null;
+            preparedTexture = null;
+            preparedStateInvalid = false;
+            return;
+        }
+
+        selectedIndex = Math.min(selectedIndex, messages.size() - 1);
+        VideoNotePayload payload = messages.get(selectedIndex);
+        try {
+            VideoNotePlayback playback = VideoNotePlaybackManager.getInstance().load(payload);
+            VideoNoteRenderState state = VideoNoteRenderState.from(payload, playback, frameCache);
+            Identifier texture = textureManager.upload(state.frame());
+            preparedState = state;
+            preparedTexture = texture;
+            preparedStateInvalid = false;
+        } catch (RuntimeException error) {
+            preparedState = null;
+            preparedTexture = null;
+            preparedStateInvalid = true;
+        }
     }
 
     @Override
@@ -50,14 +87,15 @@ public final class VideoNoteScreen extends Screen {
             return;
         }
 
-        selectedIndex = Math.min(selectedIndex, messages.size() - 1);
-        VideoNotePayload payload = messages.get(selectedIndex);
-        VideoNotePlayback playback = VideoNotePlaybackManager.getInstance().load(payload);
-        VideoNoteRenderState state;
-        try {
-            state = VideoNoteRenderState.from(payload, playback, frameCache);
-        } catch (RuntimeException error) {
+        if (preparedStateInvalid) {
             graphics.centeredText(font, Component.literal("Invalid video note"), width / 2, top + 180, 0xFFFF8A8A);
+            return;
+        }
+
+        VideoNoteRenderState state = preparedState;
+        Identifier texture = preparedTexture;
+        if (state == null || texture == null) {
+            graphics.centeredText(font, Component.literal("Preparing video…"), width / 2, top + 180, 0xFFB9C2CF);
             return;
         }
 
@@ -65,7 +103,6 @@ public final class VideoNoteScreen extends Screen {
         int cy = top + 148;
         int imageLeft = cx - VIDEO_RADIUS;
         int imageTop = cy - VIDEO_RADIUS;
-        Identifier texture = textureManager.upload(state.frame());
 
         graphics.fill(imageLeft - 6, imageTop - 6, imageLeft + VIDEO_SIZE + 6, imageTop + VIDEO_SIZE + 6, 0xFF303A49);
         graphics.blit(RenderPipelines.GUI_TEXTURED, texture, imageLeft, imageTop,
@@ -136,6 +173,9 @@ public final class VideoNoteScreen extends Screen {
             VideoNotePlaybackManager.getInstance().load(messages.get(selectedIndex)).stop();
         }
         selectedIndex = newIndex;
+        preparedState = null;
+        preparedTexture = null;
+        preparedStateInvalid = false;
     }
 
     @Override
@@ -206,6 +246,9 @@ public final class VideoNoteScreen extends Screen {
         }
         frameCache.clear();
         textureManager.close();
+        preparedState = null;
+        preparedTexture = null;
+        preparedStateInvalid = false;
         super.removed();
     }
 
