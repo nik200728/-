@@ -3,7 +3,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { MAX_VIDEO_BYTES, MAX_VIDEO_DIMENSION, MAX_VIDEO_DURATION_MS, MAX_VIDEO_FPS, mp4ToTgv1, tgv1ToMp4, validateVideoInput } from "./video.ts";
+import { MAX_VIDEO_BYTES, MAX_VIDEO_DIMENSION, MAX_VIDEO_DURATION_MS, MAX_VIDEO_FPS, mp4ToTgv1, tgv1ToMp4, validateVideoInput } from "./video.js";
 
 test("accepts a bounded video payload", () => {
   const result = validateVideoInput({
