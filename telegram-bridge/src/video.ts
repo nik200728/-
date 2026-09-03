@@ -16,6 +16,7 @@ export const MAX_VIDEO_DIMENSION = 512;
 export const MAX_VIDEO_FPS = 30;
 export const MAX_TELEGRAM_VIDEO_BYTES = 50 * 1024 * 1024;
 
+const MAX_VIDEO_BASE64_LENGTH = Math.ceil(MAX_VIDEO_BYTES / 3) * 4;
 const MAGIC = 0x54475631;
 const VERSION = 1;
 const HEADER_BYTES = 23;
@@ -26,6 +27,7 @@ type Frame = { timestampMs: number; image: Buffer };
 type Tgv1Video = { width: number; height: number; frameRate: number; durationMs: number; frames: Frame[] };
 
 function decodeBase64(value: string): Buffer {
+  if (value.length > MAX_VIDEO_BASE64_LENGTH) throw new Error("video_too_large");
   if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value) || value.length % 4 !== 0) {
     throw new Error("invalid_video_base64");
   }
