@@ -63,7 +63,12 @@ public final class WebcamCaptureService implements AutoCloseable {
         if (stream == null) {
             throw new IllegalStateException("Webcam is not open");
         }
-        BufferedImage source = stream.capture();
+        final BufferedImage source;
+        try {
+            source = stream.capture();
+        } catch (Exception exception) {
+            throw new IOException("Failed to capture webcam frame", exception);
+        }
         if (source == null) return null;
 
         BufferedImage square = centerSquare(source);
