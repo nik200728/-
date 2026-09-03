@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
-import { MAX_VIDEO_BYTES, MAX_VIDEO_DIMENSION, MAX_VIDEO_DURATION_MS, MAX_VIDEO_FPS, tgv1ToMp4, validateVideoInput } from "./video.ts";
+import { MAX_VIDEO_BYTES, MAX_VIDEO_DIMENSION, MAX_VIDEO_DURATION_MS, MAX_VIDEO_FPS, mp4ToTgv1, tgv1ToMp4, validateVideoInput } from "./video.ts";
 
 test("accepts a bounded video payload", () => {
   const result = validateVideoInput({
@@ -100,4 +103,27 @@ test("rejects trailing bytes in an otherwise valid TGV1 container", async () => 
   data.writeUInt8(0xff, 35);
   data.writeUInt8(0xee, 36);
   await assert.rejects(() => tgv1ToMp4(data), /trailing_video_container_bytes/);
+});
+
+test("rejects Telegram videos longer than 60 seconds before ffmpeg extraction", async () => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "tgvoice-test-"));
+  const ffprobePath = path.join(dir, "ffprobe");
+  const ffmpegPath = path.join(dir, "ffmpeg");
+  const previousProbe = process.env.FFPROBE_PATH;
+  const previousFfmpeg = process.env.FFMPEG_PATH;
+  try {
+    await fs.writeFile(ffprobePath, "#!/bin/sh\nprintf '61.0\\n'\n");
+    await fs.writeFile(ffmpegPath, "#!/bin/sh\necho 'ffmpeg should not be called' >&2\nexit 99\n");
+    await fs.chmod(ffprobePath, 0o755);
+    await fs.chmod(ffmpegPath, 0o755);
+    process.env.FFPROBE_PATH = ffprobePath;
+    process.env.FFMPEG_PATH = ffmpegPath;
+    await assert.rejects(() => mp4ToTgv1(Buffer.from("fake-mp4")), /invalid_telegram_video_duration/);
+  } finally {
+    if (previousProbe === undefined) delete process.env.FFPROBE_PATH;
+    else process.env.FFPROBE_PATH = previousProbe;
+    if (previousFfmpeg === undefined) delete process.env.FFMPEG_PATH;
+    else process.env.FFMPEG_PATH = previousFfmpeg;
+    await fs.rm(dir, { recursive: true, force: true });
+  }
 });
