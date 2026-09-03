@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MAX_VIDEO_BYTES, MAX_VIDEO_DIMENSION, MAX_VIDEO_DURATION_MS, MAX_VIDEO_FPS, tgv1ToMp4, validateVideoInput } from "./video.ts";
+import { MAX_VIDEO_BYTES, MAX_VIDEO_DIMENSION, MAX_VIDEO_DURATION_MS, MAX_VIDEO_FPS, tgv1ToMp4, validateVideoInput } from "./video.js";
 
 test("accepts a bounded video payload", () => {
   const result = validateVideoInput({
