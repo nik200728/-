@@ -22,11 +22,17 @@ public final class VideoNoteManager {
 
     public synchronized void accept(VideoNotePayload payload) {
         if (payload == null) return;
-        messages.remove(payload.messageId());
-        messages.put(payload.messageId(), payload);
+        String messageId = payload.messageId();
+        if (messages.containsKey(messageId)) {
+            // A replacement payload with the same ID must not keep stale timeline state.
+            VideoNotePlaybackManager.getInstance().remove(messageId);
+            messages.remove(messageId);
+        }
+        messages.put(messageId, payload);
         while (messages.size() > MAX_MESSAGES) {
             String oldest = messages.keySet().iterator().next();
             messages.remove(oldest);
+            VideoNotePlaybackManager.getInstance().remove(oldest);
         }
     }
 
