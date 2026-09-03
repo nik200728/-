@@ -28,18 +28,39 @@ type Tgv1Video = { width: number; height: number; frameRate: number; durationMs:
 
 function decodeBase64(value: string): Buffer {
   if (value.length > MAX_VIDEO_BASE64_LENGTH) throw new Error("video_too_large");
-  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value) || value.length % 4 !== 0) {
+  if (value.length === 0 || value.length % 4 !== 0) throw new Error("invalid_video_base64");
+
+  let padding = 0;
+  if (value.endsWith("==")) padding = 2;
+  else if (value.endsWith("=")) padding = 1;
+
+  const contentLength = value.length - padding;
+  for (let i = 0; i < contentLength; i++) {
+    const code = value.charCodeAt(i);
+    const valid =
+      (code >= 65 && code <= 90) ||
+      (code >= 97 && code <= 122) ||
+      (code >= 48 && code <= 57) ||
+      code === 43 ||
+      code === 47;
+    if (!valid) throw new Error("invalid_video_base64");
+  }
+  for (let i = contentLength; i < value.length; i++) {
+    if (value.charCodeAt(i) !== 61) throw new Error("invalid_video_base64");
+  }
+  if (padding > 2 || contentLength === 0 || (padding > 0 && contentLength % 4 === 0)) {
     throw new Error("invalid_video_base64");
   }
+
   const video = Buffer.from(value, "base64");
   if (!video.length || video.toString("base64") !== value) throw new Error("invalid_video_base64");
+  if (video.length > MAX_VIDEO_BYTES) throw new Error("video_too_large");
   return video;
 }
 
 export function validateVideoInput(body: any) {
   if (typeof body.videoBase64 !== "string") throw new Error("videoBase64 required");
   const video = decodeBase64(body.videoBase64);
-  if (video.length > MAX_VIDEO_BYTES) throw new Error("video_too_large");
   const durationMs = Number(body.durationMs), width = Number(body.width), height = Number(body.height), frameRate = Number(body.frameRate);
   if (!Number.isInteger(durationMs) || durationMs < 1 || durationMs > MAX_VIDEO_DURATION_MS) throw new Error("invalid_duration");
   if (!Number.isInteger(width) || width < 1 || width > MAX_VIDEO_DIMENSION) throw new Error("invalid_width");
@@ -149,9 +170,7 @@ export async function sendTelegramVideoNote(telegram: (method: string, init?: Re
 
 export async function downloadTelegramVideoNote(telegram: (method: string, init?: RequestInit) => Promise<any>, message: any, botToken: string) {
   const note = message.video_note; if (!note?.file_id) return null; const duration = Number(note.duration ?? 0), length = Number(note.length ?? 0);
-  if (!Number.isInteger(duration) || duration < 1 || duration > 60) throw new Error("invalid_telegram_video_duration"); if (!Number.isInteger(length) || length < 1 || length > MAX_VIDEO_DIMENSION) throw new Error("invalid_telegram_video_length");
-  const file = await telegram("getFile", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ file_id: note.file_id }) }); const filePath = file?.file_path as string | undefined; if (!filePath) throw new Error("telegram_video_file_path_missing");
-  const response = await fetch(`https://api.telegram.org/file/bot${botToken}/${filePath}`, { signal: AbortSignal.timeout(30_000) }); if (!response.ok) throw new Error(`telegram_video_file_download_failed:${response.status}`); const mp4 = Buffer.from(await response.arrayBuffer());
+  if (!Number.isInteger(duration) || duration < 1 || duration > 60) throw new Error("invalid_telegram_video_duration"); if (!Number.isInteger(length) || length < 1 || length > MAX_VIDEO_DIMENSION) throw new Error("invalid_telegram_video_length"); const file = await telegram("getFile", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ file_id: note.file_id }) }); const filePath = file?.file_path as string | undefined; if (!filePath) throw new Error("telegram_video_file_path_missing"); const response = await fetch(`https://api.telegram.org/file/bot${botToken}/${filePath}`, { signal: AbortSignal.timeout(30_000) }); if (!response.ok) throw new Error(`telegram_video_file_download_failed:${response.status}`); const mp4 = Buffer.from(await response.arrayBuffer());
   if (!mp4.length || mp4.length > MAX_TELEGRAM_VIDEO_BYTES) throw new Error("inbound_video_too_large"); const converted = await mp4ToTgv1(mp4);
   return { messageId: `tg-video-${message.message_id}-${crypto.randomUUID()}`, durationMs: converted.durationMs, width: converted.width, height: converted.height, frameRate: converted.frameRate, video: converted.video };
 }
