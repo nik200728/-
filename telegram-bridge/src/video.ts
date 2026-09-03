@@ -119,9 +119,11 @@ export async function mp4ToTgv1(mp4: Buffer) {
   try {
     const input = path.join(dir, "input.mp4"), pattern = path.join(dir, "frame-%05d.jpg"); await fs.writeFile(input, mp4);
     const durationMs = await probeDurationMs(input);
-    await runProcess(ffmpeg(), ["-hide_banner", "-loglevel", "error", "-nostdin", "-i", input, "-t", "60", "-vf", `fps=${MAX_VIDEO_FPS},scale=${MAX_VIDEO_DIMENSION}:${MAX_VIDEO_DIMENSION}:force_original_aspect_ratio=decrease,pad=${MAX_VIDEO_DIMENSION}:${MAX_VIDEO_DIMENSION}:(ow-iw)/2:(oh-ih)/2`, "-q:v", "5", pattern]);
+    if (durationMs > MAX_VIDEO_DURATION_MS) throw new Error("invalid_telegram_video_duration");
+    await runProcess(ffmpeg(), ["-hide_banner", "-loglevel", "error", "-nostdin", "-i", input, "-t", String(MAX_VIDEO_DURATION_MS / 1000), "-vf", `fps=${MAX_VIDEO_FPS},scale=${MAX_VIDEO_DIMENSION}:${MAX_VIDEO_DIMENSION}:force_original_aspect_ratio=decrease,pad=${MAX_VIDEO_DIMENSION}:${MAX_VIDEO_DIMENSION}:(ow-iw)/2:(oh-ih)`, "-q:v", "5", pattern]);
     const names = (await fs.readdir(dir)).filter(n => /^frame-\d{5}\.jpg$/.test(n)).sort(); if (!names.length || names.length > MAX_FRAMES) throw new Error("invalid_extracted_frame_count");
-    const boundedDuration = Math.min(MAX_VIDEO_DURATION_MS, durationMs), fps = Math.min(MAX_VIDEO_FPS, Math.max(1, Math.round(names.length / Math.max(1, boundedDuration / 1000))));
+    const boundedDuration = durationMs;
+    const fps = Math.min(MAX_VIDEO_FPS, Math.max(1, Math.round(names.length / Math.max(1, boundedDuration / 1000))));
     const interval = boundedDuration / (names.length + 1); const frames: Frame[] = [];
     for (let i = 0; i < names.length; i++) { const image = await fs.readFile(path.join(dir, names[i])); if (image.length > MAX_FRAME_BYTES) throw new Error("extracted_frame_too_large"); frames.push({ timestampMs: Math.max(1, Math.floor(interval * (i + 1))), image }); }
     return { video: encodeTgv1({ width: MAX_VIDEO_DIMENSION, height: MAX_VIDEO_DIMENSION, frameRate: fps, durationMs: boundedDuration, frames }), width: MAX_VIDEO_DIMENSION, height: MAX_VIDEO_DIMENSION, frameRate: fps, durationMs: boundedDuration };
