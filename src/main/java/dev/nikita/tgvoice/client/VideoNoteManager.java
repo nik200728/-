@@ -50,5 +50,6 @@ public final class VideoNoteManager {
 
     public synchronized void clear() {
         messages.clear();
+        VideoNotePlaybackManager.getInstance().clear();
     }
 }
