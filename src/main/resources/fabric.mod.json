@@ -9,7 +9,7 @@
   "environment": "*",
   "entrypoints": {
     "main": ["nik200728.tgvoice.TelegramVoiceMod"],
-    "client": ["nik200728.tgvoice.client.TelegramVoiceClient"]
+    "client": ["dev.nikita.tgvoice.client.TelegramVoiceClient"]
   },
   "depends": {
     "fabricloader": ">=0.18.4",
