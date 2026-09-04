@@ -21,14 +21,23 @@ public final class VideoNoteUiController {
             CATEGORY
     ));
 
+    private static final long MAX_TICK_ELAPSED_NANOS = 250_000_000L;
     private static boolean registered;
+    private static long lastTickNanos;
 
     private VideoNoteUiController() {}
 
     public static void register() {
         if (registered) return;
         registered = true;
+        lastTickNanos = System.nanoTime();
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            long now = System.nanoTime();
+            long elapsedNanos = Math.max(0L, now - lastTickNanos);
+            lastTickNanos = now;
+            long elapsedMillis = Math.min(MAX_TICK_ELAPSED_NANOS, elapsedNanos) / 1_000_000L;
+            VideoNotePlaybackManager.getInstance().tick(elapsedMillis);
+
             while (OPEN_KEY.consumeClick()) open(client);
         });
     }
