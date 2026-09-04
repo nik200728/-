@@ -170,7 +170,9 @@ public final class VideoNoteScreen extends Screen {
         List<VideoNotePayload> messages = VideoNoteManager.getInstance().messages();
         if (newIndex < 0 || newIndex >= messages.size() || newIndex == selectedIndex) return;
         if (!messages.isEmpty() && selectedIndex >= 0 && selectedIndex < messages.size()) {
-            VideoNotePlaybackManager.getInstance().load(messages.get(selectedIndex)).stop();
+            VideoNotePayload current = messages.get(selectedIndex);
+            VideoNotePlayback playback = VideoNotePlaybackManager.getInstance().get(current.messageId());
+            if (playback != null) playback.stop();
         }
         selectedIndex = newIndex;
         preparedState = null;
@@ -242,7 +244,9 @@ public final class VideoNoteScreen extends Screen {
     public void removed() {
         List<VideoNotePayload> messages = VideoNoteManager.getInstance().messages();
         if (!messages.isEmpty() && selectedIndex >= 0 && selectedIndex < messages.size()) {
-            VideoNotePlaybackManager.getInstance().load(messages.get(selectedIndex)).stop();
+            VideoNotePayload current = messages.get(selectedIndex);
+            VideoNotePlayback playback = VideoNotePlaybackManager.getInstance().get(current.messageId());
+            if (playback != null) playback.stop();
         }
         frameCache.clear();
         textureManager.close();
