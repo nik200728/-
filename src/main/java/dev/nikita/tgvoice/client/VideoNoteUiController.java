@@ -21,16 +21,30 @@ public final class VideoNoteUiController {
             CATEGORY
     ));
 
+    private static final long MAX_TICK_ELAPSED_NANOS = 250_000_000L;
     private static boolean registered;
+    private static long lastTickNanos;
 
     private VideoNoteUiController() {}
 
     public static void register() {
         if (registered) return;
         registered = true;
+        lastTickNanos = System.nanoTime();
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            tickPlayback();
             while (OPEN_KEY.consumeClick()) open(client);
         });
+    }
+
+    private static void tickPlayback() {
+        long now = System.nanoTime();
+        long elapsedNanos = now - lastTickNanos;
+        lastTickNanos = now;
+        if (elapsedNanos <= 0) return;
+        VideoNotePlaybackManager.getInstance().tick(
+                Math.min(MAX_TICK_ELAPSED_NANOS, elapsedNanos) / 1_000_000L
+        );
     }
 
     private static void open(Minecraft client) {
