@@ -16,6 +16,7 @@ public final class VideoNoteRecorder implements AutoCloseable {
     private static final int MAX_FRAME_BYTES = 512 * 1024;
     private static final int MAX_FRAMES = 900;
     private static final int MAX_VIDEO_BYTES = VideoNotePayload.MAX_VIDEO_BYTES;
+    private static final long WORKER_JOIN_TIMEOUT_MILLIS = 3000L;
 
     private final WebcamCaptureService camera;
     private final Object lock = new Object();
@@ -36,6 +37,7 @@ public final class VideoNoteRecorder implements AutoCloseable {
 
     public synchronized void start() throws Exception {
         if (recording) throw new IllegalStateException("video recording is already active");
+        if (worker != null && worker.isAlive()) throw new IllegalStateException("previous video capture worker is still stopping");
         camera.open();
         synchronized (lock) {
             frames.clear();
@@ -152,14 +154,17 @@ public final class VideoNoteRecorder implements AutoCloseable {
             cancelled = cancel;
             recording = false;
             thread = worker;
-            worker = null;
         }
         if (thread != null && thread != Thread.currentThread()) {
             thread.interrupt();
             try {
-                thread.join(1500L);
+                thread.join(WORKER_JOIN_TIMEOUT_MILLIS);
             } catch (InterruptedException interrupted) {
                 Thread.currentThread().interrupt();
+            }
+            synchronized (this) {
+                if (worker == thread && !thread.isAlive()) worker = null;
+                else if (worker == thread && failure == null) failure = "Webcam capture worker did not stop cleanly";
             }
         }
     }
