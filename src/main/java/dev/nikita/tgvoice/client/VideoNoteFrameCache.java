@@ -54,8 +54,8 @@ public final class VideoNoteFrameCache implements AutoCloseable {
             for (int x = 0; x < width; x++) {
                 float dx = x - centerX;
                 if (dx * dx + dy * dy > radiusSquared) {
-                    int rgba = image.getPixel(x, y);
-                    image.setPixel(x, y, rgba & 0x00FFFFFF);
+                    int rgba = image.getColor(x, y);
+                    image.setColor(x, y, rgba & 0x00FFFFFF);
                 }
             }
         }
