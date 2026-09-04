@@ -5,7 +5,6 @@ import dev.nikita.tgvoice.network.VideoNoteContainer;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -23,7 +22,7 @@ public final class VideoNoteFrameCache implements AutoCloseable {
 
     public synchronized NativeImage get(VideoNoteContainer.Frame frame, int expectedWidth, int expectedHeight) {
         if (frame == null) return null;
-        FrameKey key = new FrameKey(frame.timestampMillis(), frame.encodedImage());
+        FrameKey key = new FrameKey(frame, expectedWidth, expectedHeight);
         NativeImage cached = cache.get(key);
         if (cached != null) return cached;
         try {
@@ -69,23 +68,25 @@ public final class VideoNoteFrameCache implements AutoCloseable {
     @Override
     public void close() { clear(); }
 
-    /** Uses the full encoded frame bytes so distinct JPEG payloads cannot collide in the cache. */
+    /** Uses frame object identity to avoid copying and hashing the encoded JPEG on every lookup. */
     private static final class FrameKey {
-        private final long timestampMillis;
-        private final byte[] encodedImage;
+        private final VideoNoteContainer.Frame frame;
+        private final int width;
+        private final int height;
         private final int hashCode;
 
-        private FrameKey(long timestampMillis, byte[] encodedImage) {
-            this.timestampMillis = timestampMillis;
-            this.encodedImage = Arrays.copyOf(encodedImage, encodedImage.length);
-            this.hashCode = 31 * Long.hashCode(timestampMillis) + Arrays.hashCode(this.encodedImage);
+        private FrameKey(VideoNoteContainer.Frame frame, int width, int height) {
+            this.frame = frame;
+            this.width = width;
+            this.height = height;
+            this.hashCode = 31 * (31 * System.identityHashCode(frame) + width) + height;
         }
 
         @Override
         public boolean equals(Object other) {
             if (this == other) return true;
             if (!(other instanceof FrameKey key)) return false;
-            return timestampMillis == key.timestampMillis && Arrays.equals(encodedImage, key.encodedImage);
+            return frame == key.frame && width == key.width && height == key.height;
         }
 
         @Override
