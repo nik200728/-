@@ -12,6 +12,7 @@ import dev.nikita.tgvoice.network.VideoNotePayload;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import su.plo.voice.api.client.PlasmoVoiceClient;
 
@@ -39,6 +40,13 @@ public final class TelegramVoiceClient implements ClientModInitializer {
             long elapsedMillis = Math.max(0L, Math.min(250L, (now - lastTickNanos) / 1_000_000L));
             lastTickNanos = now;
             VideoNotePlaybackManager.getInstance().tick(elapsedMillis);
+        });
+
+        ClientPlayConnectionEvents.DISCONNECT.register((handler, client) -> {
+            VideoNoteCaptureController.shutdown();
+            VideoNotePlaybackManager.getInstance().clear();
+            VideoNoteManager.getInstance().clear();
+            lastTickNanos = System.nanoTime();
         });
 
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
