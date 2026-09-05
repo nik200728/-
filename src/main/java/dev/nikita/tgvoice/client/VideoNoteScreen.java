@@ -33,10 +33,14 @@ public final class VideoNoteScreen extends Screen {
 
     @Override
     protected void init() {
-        selectedIndex = Math.max(0, Math.min(selectedIndex, VideoNoteManager.getInstance().messages().size() - 1));
+        clampSelectedIndex(VideoNoteManager.getInstance().messages().size());
         preparedState = null;
         preparedTexture = null;
         preparedStateInvalid = false;
+    }
+
+    private void clampSelectedIndex(int messageCount) {
+        selectedIndex = messageCount <= 0 ? 0 : Math.min(Math.max(0, selectedIndex), messageCount - 1);
     }
 
     /**
@@ -48,13 +52,14 @@ public final class VideoNoteScreen extends Screen {
         super.tick();
         List<VideoNotePayload> messages = VideoNoteManager.getInstance().messages();
         if (messages.isEmpty()) {
+            selectedIndex = 0;
             preparedState = null;
             preparedTexture = null;
             preparedStateInvalid = false;
             return;
         }
 
-        selectedIndex = Math.min(selectedIndex, messages.size() - 1);
+        clampSelectedIndex(messages.size());
         VideoNotePayload payload = messages.get(selectedIndex);
         try {
             VideoNotePlayback playback = VideoNotePlaybackManager.getInstance().load(payload);
@@ -87,6 +92,7 @@ public final class VideoNoteScreen extends Screen {
             return;
         }
 
+        clampSelectedIndex(messages.size());
         if (preparedStateInvalid) {
             graphics.centeredText(font, Component.literal("Invalid video note"), width / 2, top + 180, 0xFFFF8A8A);
             return;
@@ -184,6 +190,7 @@ public final class VideoNoteScreen extends Screen {
     public boolean mouseClicked(MouseButtonEvent event, boolean doubleClick) {
         List<VideoNotePayload> messages = VideoNoteManager.getInstance().messages();
         if (messages.isEmpty()) return super.mouseClicked(event, doubleClick);
+        clampSelectedIndex(messages.size());
 
         double mouseX = event.x();
         double mouseY = event.y();
@@ -229,6 +236,7 @@ public final class VideoNoteScreen extends Screen {
     public boolean keyPressed(KeyEvent event) {
         List<VideoNotePayload> messages = VideoNoteManager.getInstance().messages();
         if (messages.isEmpty()) return super.keyPressed(event);
+        clampSelectedIndex(messages.size());
         if (event.key() == 263 && selectedIndex > 0) {
             selectIndex(selectedIndex - 1);
             return true;
