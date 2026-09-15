@@ -112,8 +112,18 @@ public final class VideoNoteRecorder implements AutoCloseable {
                     synchronized (lock) {
                         int frameCost = VideoNoteContainer.FRAME_OVERHEAD_BYTES + jpeg.length;
                         if (encodedBytes + frameCost <= MAX_VIDEO_BYTES) {
-                            frames.add(new VideoNoteContainer.Frame(Math.max(1L, elapsed), jpeg));
-                            encodedBytes += frameCost;
+                            long timestamp = Math.max(1L, elapsed);
+                            if (!frames.isEmpty()) {
+                                timestamp = Math.max(timestamp, frames.get(frames.size() - 1).timestampMillis() + 1L);
+                            }
+                            if (timestamp < MAX_DURATION_MILLIS) {
+                                frames.add(new VideoNoteContainer.Frame(timestamp, jpeg));
+                                encodedBytes += frameCost;
+                            } else {
+                                failure = "Video duration limit reached";
+                                recording = false;
+                                break;
+                            }
                         } else {
                             failure = "Video size limit reached";
                             recording = false;
