@@ -127,3 +127,38 @@ test("rejects Telegram videos longer than 60 seconds before ffmpeg extraction", 
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test("round-trips a small TGV1 video through ffmpeg", async () => {
+  const jpeg = Buffer.from(
+    "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAYEBQYFBAYGBQYHBwYIChAKCgkJChQODwwQFxQYGBcUFhYaHSUfGhsjHBYWICwgIyYnKSopGR8tMC0oMCUoKSj/2wBDAQcHBwoIChMKChMoGhYaKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCj/wAARCAACAAIDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1F1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDz6iiivAPqD//Z",
+    "base64",
+  );
+  const frame = jpeg;
+  const data = Buffer.alloc(23 + 12 + frame.length + 12 + frame.length);
+  let p = 0;
+  data.writeInt32BE(0x54475631, p); p += 4;
+  data.writeUInt8(1, p++);
+  data.writeUInt16BE(2, p); p += 2;
+  data.writeUInt16BE(2, p); p += 2;
+  data.writeInt32BE(2, p); p += 4;
+  data.writeBigInt64BE(1000n, p); p += 8;
+  data.writeUInt16BE(2, p); p += 2;
+  data.writeBigInt64BE(250n, p); p += 8;
+  data.writeInt32BE(frame.length, p); p += 4;
+  frame.copy(data, p); p += frame.length;
+  data.writeBigInt64BE(750n, p); p += 8;
+  data.writeInt32BE(frame.length, p); p += 4;
+  frame.copy(data, p);
+
+  const mp4 = await tgv1ToMp4(data);
+  assert.ok(mp4.length > 0);
+  assert.ok(mp4.length <= 50 * 1024 * 1024);
+
+  const roundTrip = await mp4ToTgv1(mp4);
+  assert.equal(roundTrip.width, 512);
+  assert.equal(roundTrip.height, 512);
+  assert.equal(roundTrip.frameRate >= 1, true);
+  assert.equal(roundTrip.durationMs, 1000);
+  assert.ok(roundTrip.video.length > 23);
+  assert.ok(roundTrip.video.length <= MAX_VIDEO_BYTES);
+});
